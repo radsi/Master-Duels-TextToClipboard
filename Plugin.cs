@@ -383,6 +383,8 @@ namespace TextToClipboard
                     searchShopDesc = false;
                 }
 
+                if (String.IsNullOrWhiteSpace(copyText)) return;
+
                 Plugin.Log.LogInfo(copyText);
                 GUIUtility.systemCopyBuffer = copyText;
             }
