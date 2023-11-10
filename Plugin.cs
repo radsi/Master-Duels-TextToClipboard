@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Reflection;
 
 using YgomSystem.UI;
@@ -97,16 +97,16 @@ namespace TextToClipboard
         }
         public static Menus currentMenu = Menus.NONE;
 
+        public static string copyText = "";
+
         [HarmonyPostfix]
         static void Postfix(SelectionButton __instance)
         {
-            string copyText = "";
-
             if (__instance.name == "BackButton") return;
 
             try
             {
-                copyText = BaseClass.FindExtendedTextElement(__instance.transform).text ?? "";
+                copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
 
                 if (menuNames.ContainsKey(copyText))
                 {
@@ -131,13 +131,13 @@ namespace TextToClipboard
                     {
                         if (__instance.transform.GetChild(4).gameObject.activeSelf || !__instance.transform.parent.transform.name.Contains("Content"))
                         {
-                            copyText = $"{(__instance.transform.parent.parent.name.Contains("View") ? "Chooice" : "Option")}: {BaseClass.FindExtendedTextElement(__instance.transform).text}";
-                            copyText += $", {BaseClass.FindExtendedTextElement(__instance.transform.GetChild(3)).text}";
+                            copyText = $"{(__instance.transform.parent.parent.name.Contains("View") ? "Chooice" : "Option")}: {BaseClass.FindExtendedTextElement(__instance.transform, true).text}";
+                            copyText += $", {BaseClass.FindExtendedTextElement(__instance.transform.GetChild(3), true).text}";
                         }
                     }
                     catch
                     {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform.parent.parent.parent.parent.parent.parent.parent).text;
+                        copyText = BaseClass.FindExtendedTextElement(__instance.transform.parent.parent.parent.parent.parent.parent.parent, true).text;
                     }
                     
                     break;
@@ -145,7 +145,7 @@ namespace TextToClipboard
                 case Menus.DECK:
                     if(__instance.name == "Button")
                     {
-                        copyText = $"{BaseClass.FindExtendedTextElement(__instance.transform).text}\n{BaseClass.FindExtendedTextElement("UI/ContentCanvas/ContentManager/ProfileEdit/ProfileEditUI(Clone)/Root/ProfileArea/MainArea/RootView/ItemNameText").text}";
+                        copyText = $"{BaseClass.FindExtendedTextElement(__instance.transform, true).text}\n{BaseClass.FindExtendedTextElement("UI/ContentCanvas/ContentManager/ProfileEdit/ProfileEditUI(Clone)/Root/ProfileArea/MainArea/RootView/ItemNameText").text}";
                     }
 
                     break;
@@ -155,7 +155,8 @@ namespace TextToClipboard
                     break;
 
                 case Menus.SHOP:
-
+                    BaseClass.searchShopDesc = true;
+                    BaseClass.timer = 0f;
                     break;
 
                 case Menus.Missions:
@@ -176,7 +177,7 @@ namespace TextToClipboard
         static SelectionButton oldButton;
         public static GameObject BackButton;
 
-        static string copyText;
+        public static string copyText;
 
         [HarmonyPostfix]
         static void Postfix(SelectionButton __instance)
@@ -191,7 +192,7 @@ namespace TextToClipboard
                     try
                     {
                         if (__instance.name == "ButtonBanner") return;
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform).text;
+                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
                     }
                     catch
                     {
@@ -202,16 +203,16 @@ namespace TextToClipboard
                 case PatchOnClick.Menus.DUEL:
                     try
                     {
-                        copyText = $"{(__instance.transform.parent.parent.name.Contains("View") ? "Chooice" : "Option")}: {BaseClass.FindExtendedTextElement(__instance.transform).text}";
+                        copyText = $"{(__instance.transform.parent.parent.name.Contains("View") ? "Chooice" : "Option")}: {BaseClass.FindExtendedTextElement(__instance.transform, true).text}";
 
                         if (__instance.transform.GetChild(4).gameObject.activeSelf || !__instance.transform.parent.transform.name.Contains("Content"))
                         {
-                            copyText += $", {BaseClass.FindExtendedTextElement(__instance.transform.GetChild(3)).text}";
+                            copyText += $", {BaseClass.FindExtendedTextElement(__instance.transform.GetChild(3), true).text}";
                         }
                     }
                     catch
                     {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform).text;
+                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
                     }
                     break;
 
@@ -222,11 +223,11 @@ namespace TextToClipboard
                         {
                             if (__instance.transform.GetChild(6).gameObject.activeSelf && __instance.transform.GetChild(6).name.Contains("IconAddDeck")) return;
                         }
-                        copyText = $"{(__instance.name == "Body" ? "Deck: " : "")}{BaseClass.FindExtendedTextElement(__instance.transform).text}";
+                        copyText = $"{(__instance.name == "Body" ? "Deck: " : "")}{BaseClass.FindExtendedTextElement(__instance.transform, true).text}";
                     }
                     catch
                     {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform.parent.parent.parent.parent.GetChild(0)).text;
+                        copyText = BaseClass.FindExtendedTextElement(__instance.transform.parent.parent.parent.parent.GetChild(0), true).text;
                     }
 
                     break;
@@ -234,7 +235,7 @@ namespace TextToClipboard
                 case PatchOnClick.Menus.SOLO:
                     try
                     {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform).text;
+                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
                     }
                     catch
                     {
@@ -245,21 +246,21 @@ namespace TextToClipboard
                 case PatchOnClick.Menus.SHOP:
                     try
                     {
-                        copyText = $"Shop item: {BaseClass.FindExtendedTextElement(__instance.transform.GetChild(2).GetChild(0).GetChild(0)).text}";
+                        copyText = $"Shop item: {BaseClass.FindExtendedTextElement(__instance.transform.GetChild(2).GetChild(0).GetChild(0), true).text}";
                     }
                     catch
                     {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform).text;
+                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
                     }
                     break;
                 case PatchOnClick.Menus.Missions:
                     try
                     {
-                        copyText = $"{BaseClass.FindExtendedTextElement(__instance.transform.parent.parent.parent.parent.parent.parent.parent.parent.parent).text} - {BaseClass.FindExtendedTextElement(__instance.transform).text}";
+                        copyText = $"{BaseClass.FindExtendedTextElement(__instance.transform.parent.parent.parent.parent.parent.parent.parent.parent.parent, true).text} - {BaseClass.FindExtendedTextElement(__instance.transform, true).text}";
                     }
                     catch
                     {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform).text;
+                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
                     }
                     break;
             }
@@ -295,17 +296,20 @@ namespace TextToClipboard
         private ExtendedTextMeshProUGUI CardDef;
         private ExtendedTextMeshProUGUI CardPendulumScale;
 
-        private string Owned = "";
-
-
+        private string Owned;
         private string oldName;
-        private int oldPage = -1;
-        private int clampedPage;
-        private bool refreshCard = false;
-        private bool cmExists = false;
-
+        private string oldShopDesc;
         public static string SpecCharRegex = @"^\s*$|[^\w\s:\/'()"",&☆\-!]+\.?$";
         public static List<string> BanList = new() { "00:00", "NEW", "CANCEL", "COMPLETE!!", "CLEAR!", "OK" };
+
+        private int oldPage = -1;
+        private int clampedPage;
+
+        public static float timer = 0f;
+
+        private bool refreshCard;
+        private bool cmExists;
+        public static bool searchShopDesc;
 
         private void Update()
         {
@@ -349,6 +353,39 @@ namespace TextToClipboard
                 RefreshActualCard();
                 refreshCard = false;
             }
+
+            if (searchShopDesc)
+            {
+                string copyText = "";
+
+                timer += Time.deltaTime;
+
+                if (timer < 2)
+                {
+                    GameObject Shop = GameObject.Find("UI/ContentCanvas/ContentManager/ShopBuy");
+
+                    if (Shop != null)
+                    {
+                        GameObject DescTextGO = GameObject.Find("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/Main/MenuArea/MenuAreaTop/");
+
+                        ExtendedTextMeshProUGUI DescText = FindExtendedTextElementInChildren(DescTextGO.transform, false);
+
+                        if (oldShopDesc != DescText.text)
+                        {
+                            copyText = $"{FindExtendedTextElement("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/TitleSafeArea/TitleGroup/CategoryNameText").text} | {FindExtendedTextElement("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/TitleSafeArea/TitleGroup/ProductNameGroup/ProductNameText").text}\n\n{DescText.text}";
+                            oldShopDesc = DescText.text;
+                        }
+                    }
+                }
+                
+                if(timer >= 2 || copyText != "")
+                {
+                    searchShopDesc = false;
+                }
+
+                Plugin.Log.LogInfo(copyText);
+                GUIUtility.systemCopyBuffer = copyText;
+            }
         }
 
         private void RefreshActualCard()
@@ -372,9 +409,12 @@ namespace TextToClipboard
         {
             cmExists = false;
             refreshCard = false;
+            searchShopDesc = false;
+            timer = 0f;
             clampedPage = -1;
             oldPage = -1;
             oldName = "";
+            oldShopDesc = "";
             Owned = "";
             SnapContentManager = null;
             CardName = null;
@@ -413,7 +453,7 @@ namespace TextToClipboard
                 for (int i = 0; i < cardOwned.childCount; i++)
                 {
                     if (i % 2 == 0) continue;
-                    Owned += FindExtendedTextElement(cardOwned.GetChild(i)).text + "/";
+                    Owned += FindExtendedTextElement(cardOwned.GetChild(i), true).text + "/";
                 }
             }
             else
@@ -427,6 +467,7 @@ namespace TextToClipboard
                 CardLink = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/IconLink/TextLink");
             }
         }
+
         public static RubyTextGX FindUITextElement(string path)
         {
             return GameObject.Find(path)?.GetComponent<RubyTextGX>();
@@ -437,16 +478,19 @@ namespace TextToClipboard
             return GameObject.Find(path)?.GetComponent<ExtendedTextMeshProUGUI>();
         }
 
-        public static RubyTextGX FindUITextElement(Transform obj)
+        public static RubyTextGX FindUITextElement(Transform obj, bool useRegex)
         {
             RubyTextGX textElement;
 
             if (obj.TryGetComponent(out textElement) && textElement != null)
             {
-                if (!Regex.IsMatch(textElement.text, SpecCharRegex) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text)) return textElement;
+                if (!useRegex || (useRegex && !Regex.IsMatch(textElement.text, SpecCharRegex)) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text))
+                {
+                    return textElement;
+                }
             }
 
-            textElement = FindUITextElementInChildren(obj);
+            textElement = FindUITextElementInChildren(obj, true);
 
             if (textElement != null)
             {
@@ -458,7 +502,10 @@ namespace TextToClipboard
             {
                 if (parent.TryGetComponent(out textElement) && textElement != null)
                 {
-                    if (!Regex.IsMatch(textElement.text, SpecCharRegex) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text)) return textElement;
+                    if (!useRegex || (useRegex && !Regex.IsMatch(textElement.text, SpecCharRegex)) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text))
+                    {
+                        return textElement;
+                    }
                 }
                 parent = parent.parent;
             }
@@ -466,16 +513,19 @@ namespace TextToClipboard
             return null;
         }
 
-        public static ExtendedTextMeshProUGUI FindExtendedTextElement(Transform obj)
+        public static ExtendedTextMeshProUGUI FindExtendedTextElement(Transform obj, bool useRegex)
         {
             ExtendedTextMeshProUGUI textElement;
 
             if (obj.TryGetComponent(out textElement) && textElement != null)
             {
-                if (!Regex.IsMatch(textElement.text, SpecCharRegex) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text)) return textElement;
+                if (!useRegex || (useRegex && !Regex.IsMatch(textElement.text, SpecCharRegex)) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text))
+                {
+                    return textElement;
+                }
             }
 
-            textElement = FindExtendedTextElementInChildren(obj);
+            textElement = FindExtendedTextElementInChildren(obj, useRegex);
 
             if (textElement != null)
             {
@@ -487,7 +537,10 @@ namespace TextToClipboard
             {
                 if (parent.TryGetComponent(out textElement) && textElement != null)
                 {
-                    if (!Regex.IsMatch(textElement.text, SpecCharRegex) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text)) return textElement;
+                    if (!useRegex || (useRegex && !Regex.IsMatch(textElement.text, SpecCharRegex)) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text))
+                    {
+                        return textElement;
+                    }
                 }
 
                 parent = parent.parent;
@@ -496,27 +549,33 @@ namespace TextToClipboard
             return null;
         }
 
-        public static ExtendedTextMeshProUGUI FindExtendedTextElementInChildren(Transform obj)
+        public static ExtendedTextMeshProUGUI FindExtendedTextElementInChildren(Transform obj, bool useRegex)
         {
             ExtendedTextMeshProUGUI textElement;
 
             for (int i = 0; i < obj.childCount; i++)
             {
-                textElement = FindExtendedTextElement(obj.GetChild(i));
-                if (textElement != null) return textElement;
+                textElement = FindExtendedTextElement(obj.GetChild(i), useRegex);
+                if (textElement != null)
+                {
+                    return textElement;
+                }
             }
 
-            return FindUITextElementInChildren(obj);
+            return FindUITextElementInChildren(obj, useRegex);
         }
 
-        public static RubyTextGX FindUITextElementInChildren(Transform obj)
+        public static RubyTextGX FindUITextElementInChildren(Transform obj, bool useRegex)
         {
             RubyTextGX textElement;
 
             for (int i = 0; i < obj.childCount; i++)
             {
-                textElement = FindUITextElement(obj.GetChild(i));
-                if (textElement != null) return textElement;
+                textElement = FindUITextElement(obj.GetChild(i), useRegex);
+                if (textElement != null)
+                {
+                    return textElement;
+                }
             }
 
             return null;
