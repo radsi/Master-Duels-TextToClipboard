@@ -4,8 +4,10 @@ using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
+using System.Threading.Tasks;
 
 using UnityEngine;
+using UnityEngine.UI;
 
 using YgomSystem.UI;
 using YgomSystem.YGomTMPro;
@@ -20,8 +22,6 @@ using HarmonyLib;
 using Il2CppInterop.Runtime.Injection;
 
 using UniverseLib;
-using System.Threading.Tasks;
-using UnityEngine.UI;
 
 namespace TextToClipboard
 {
@@ -300,14 +300,15 @@ namespace TextToClipboard
         private ExtendedTextMeshProUGUI CardAtk;
         private ExtendedTextMeshProUGUI CardDef;
         private ExtendedTextMeshProUGUI CardPendulumScale;
-        private string CardAttribute;
+        private ExtendedTextMeshProUGUI CardAttributes;
+        private string CardElement;
 
         private string Owned;
         private string oldName;
         public static string oldShopDesc;
         public static string SpecCharRegex = @"^\s*$|[.!]+$";
         public static string TagsRegex = @"<[^>]+>|&nbsp;";
-        public static List<string> BanList = File.ReadAllLines(Path.Combine(Paths.ConfigPath, "TextToClipboard.txt")).ToList();
+        public static List<string> BanList = new() { "00:00", "NEW", "CANCEL", "OK" };
         public static List<string> SpecialBanList = new() { "Related Cards" };
 
         private int oldPage = -1;
@@ -321,7 +322,7 @@ namespace TextToClipboard
 
         enum Attribute
         {
-            Ligth = 1,
+            Light = 1,
             Dark = 2,
             Water = 3,
             Fire = 4,
@@ -458,8 +459,8 @@ namespace TextToClipboard
                 CardDef = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaBottom/BottomLeftArea/IconDef/TextDef");
                 CardPendulumScale = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaTop/TopLeftArea/IconPendulumScale/TextPendulumScale");
                 CardLink = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaTop/TopLeftArea/IconLink/TextLink");
-                CardAttribute = GetCardAttribute(GameObject.Find($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/TitleAreaGroup/TitleArea/IconAttribute").GetComponent<Image>().sprite.name);
-
+                CardElement = GetCardElement(GameObject.Find($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/TitleAreaGroup/TitleArea/IconAttribute").GetComponent<Image>().sprite.name);
+                CardAttributes = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/DescriptionArea/TitleBase/TextDescriptionItem");
                 return;
             }
 
@@ -472,7 +473,8 @@ namespace TextToClipboard
                 CardDef = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconDef/TextDefTMP");
                 CardPendulumScale = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconPendulumScale/TextPendulumScaleTMP");
                 CardLink = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconLink/TextLinkTMP");
-                CardAttribute = GetCardAttribute(GameObject.Find("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/TitleArea/PlateTitle/IconAttribute").GetComponent<Image>().sprite.name);
+                CardElement = GetCardElement(GameObject.Find("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/TitleArea/PlateTitle/IconAttribute").GetComponent<Image>().sprite.name);
+                CardAttributes = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/DescriptionArea/PlateDescription/TextDescriptionItemTMP");
 
                 Transform cardOwned = GameObject.Find("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/CardNumGroup/PremiumCardNumGroup/").transform;
                 for (int i = 0; i < cardOwned.childCount; i++)
@@ -490,7 +492,8 @@ namespace TextToClipboard
                 CardDef = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/IconDef/TextDef");
                 CardPendulumScale = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/PendulumScale/TextPendulumScale");
                 CardLink = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/IconLink/TextLink");
-                CardAttribute = GetCardAttribute(GameObject.Find("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/TitleArea/IconAttribute").GetComponent<Image>().sprite.name);
+                CardElement = GetCardElement(GameObject.Find("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/TitleArea/IconAttribute").GetComponent<Image>().sprite.name);
+                CardAttributes = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/DescriptionArea/PlateDescription/TextDescriptionItem");
             }
         }
 
@@ -607,7 +610,7 @@ namespace TextToClipboard
             return null;
         }
 
-        private string GetCardAttribute(string attrname)
+        private string GetCardElement(string attrname)
         {
             if (int.TryParse(attrname.Substring(attrname.Length - 2), out int number))
             {
@@ -628,7 +631,8 @@ namespace TextToClipboard
             if (CardName.text.IsNullOrWhiteSpace()) return "";
             if (Owned.Length > 5) Owned = Owned.Substring(Owned.Length - 6);
             string cardNameText = $"Name: {CardName.text}";
-            string cardAttributeText = $"Attribute: {CardAttribute}";
+            string CardElementText = $"Element: {CardElement}";
+            string CardAttributesText = $"Attributes: {CardAttributes.text}";
             string cardOwnedText = Owned.Length > 2 ? $"Owned: {Owned.Remove(Owned.Length - 1)}" : "";
             string cardStarsText = CardStars != null & CardStars.transform.parent.gameObject.activeSelf ? $"Stars: {CardStars.text}" : "";
             string cardLinkText = CardLink != null & CardLink.transform.parent.gameObject.activeSelf ? $"Link level: {CardLink.text}" : "";
@@ -637,7 +641,7 @@ namespace TextToClipboard
             string cardDefText = CardDef != null & CardDef.transform.parent.gameObject.activeSelf ? $"Defense: {CardDef.text}" : "";
             string cardDescriptionText = CardDescription != null ? $"Description: {CardDescription.text}" : "";
 
-            string formattedText = $"{cardNameText}\n{cardAttributeText}\n{cardOwnedText}\n{cardStarsText}\n{cardLinkText}\n{cardPendulumScaleText}\n{cardAtkText}\n{cardDefText}\n{cardDescriptionText}";
+            string formattedText = $"{cardNameText}\n{CardElementText}\n{CardAttributesText}\n{cardOwnedText}\n{cardStarsText}\n{cardLinkText}\n{cardPendulumScaleText}\n{cardAtkText}\n{cardDefText}\n{cardDescriptionText}";
             Owned = "";
             return Regex.Replace(formattedText, TagsRegex, "").Trim();
         }
