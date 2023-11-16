@@ -1,8 +1,15 @@
 using System;
 using System.Reflection;
+using System.Text.RegularExpressions;
+using System.Collections.Generic;
+using System.Linq;
+using System.IO;
+
+using UnityEngine;
 
 using YgomSystem.UI;
 using YgomSystem.YGomTMPro;
+using YgomGame.Duel;
 
 using BepInEx;
 using BepInEx.Logging;
@@ -12,14 +19,9 @@ using HarmonyLib;
 
 using Il2CppInterop.Runtime.Injection;
 
-using UnityEngine;
-
 using UniverseLib;
-
-using System.Text.RegularExpressions;
-using System.Collections.Generic;
-using System.Linq;
-using YgomGame.Duel;
+using System.Threading.Tasks;
+using UnityEngine.UI;
 
 namespace TextToClipboard
 {
@@ -102,8 +104,6 @@ namespace TextToClipboard
         [HarmonyPostfix]
         static void Postfix(SelectionButton __instance)
         {
-            if (__instance.name == "BackButton") return;
-
             try
             {
                 copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
@@ -111,7 +111,6 @@ namespace TextToClipboard
                 if (menuNames.ContainsKey(copyText))
                 {
                     currentMenu = (Menus)Enum.Parse(typeof(Menus), menuNames.Keys.ToList().Find(k => k == copyText));
-                    Plugin.Log.LogInfo(currentMenu);
                 }
             }
             catch
@@ -124,9 +123,10 @@ namespace TextToClipboard
             switch (currentMenu)
             {
                 case Menus.NONE:
-
+                    if (__instance.name == "BackButton") return;
                     break;
                 case Menus.DUEL:
+                    if (__instance.name == "BackButton") return;
                     try
                     {
                         if (__instance.transform.GetChild(4).gameObject.activeSelf || !__instance.transform.parent.transform.name.Contains("Content"))
@@ -143,7 +143,8 @@ namespace TextToClipboard
                     break;
 
                 case Menus.DECK:
-                    if(__instance.name == "Button")
+                    if (__instance.name == "BackButton") return;
+                    if (__instance.name == "Button")
                     {
                         copyText = $"{BaseClass.FindExtendedTextElement(__instance.transform, true).text}\n{BaseClass.FindExtendedTextElement("UI/ContentCanvas/ContentManager/ProfileEdit/ProfileEditUI(Clone)/Root/ProfileArea/MainArea/RootView/ItemNameText").text}";
                     }
@@ -151,21 +152,23 @@ namespace TextToClipboard
                     break;
 
                 case Menus.SOLO:
-                    
+                    if (__instance.name == "BackButton") return;
                     break;
 
                 case Menus.SHOP:
+                    if (__instance.name == "BackButton") return;
                     BaseClass.searchShopDesc = true;
                     BaseClass.timer = 0f;
                     break;
 
                 case Menus.Missions:
-
+                    if (__instance.name == "BackButton") return;
                     break;
             }
 
+            if (Regex.IsMatch(copyText, BaseClass.SpecCharRegex, RegexOptions.IgnoreCase) || BaseClass.SpecialBanList.Contains(copyText)) return;
+            copyText = Regex.Replace(copyText, BaseClass.TagsRegex, "").Trim();
             Plugin.Log.LogInfo(copyText);
-            if (Regex.IsMatch(copyText, BaseClass.SpecCharRegex, RegexOptions.IgnoreCase)) return;
 
             GUIUtility.systemCopyBuffer = copyText;
         }
@@ -265,8 +268,9 @@ namespace TextToClipboard
                     break;
             }
 
+            if (Regex.IsMatch(copyText, BaseClass.SpecCharRegex, RegexOptions.IgnoreCase) || BaseClass.SpecialBanList.Contains(copyText)) return;
+            copyText = Regex.Replace(copyText, BaseClass.TagsRegex, "").Trim();
             Plugin.Log.LogInfo(copyText);
-            if (Regex.IsMatch(copyText, BaseClass.SpecCharRegex, RegexOptions.IgnoreCase)) return;
 
             GUIUtility.systemCopyBuffer = copyText;
             oldButton = __instance;
@@ -279,8 +283,9 @@ namespace TextToClipboard
         [HarmonyPostfix]
         static void Postfix(DuelLP __instance)
         {
-            GUIUtility.systemCopyBuffer = $"{(__instance.name.Contains("Far") ? "Enemy" : "Your")} current life points: {__instance.currentLP}";
-            Plugin.Log.LogInfo(GUIUtility.systemCopyBuffer);
+            string text = $"{(__instance.name.Contains("Far") ? "Enemy" : "Your")} current life points: {__instance.currentLP}";
+            GUIUtility.systemCopyBuffer = text;
+            Plugin.Log.LogInfo(text);
         }
     }
 
@@ -295,12 +300,15 @@ namespace TextToClipboard
         private ExtendedTextMeshProUGUI CardAtk;
         private ExtendedTextMeshProUGUI CardDef;
         private ExtendedTextMeshProUGUI CardPendulumScale;
+        private string CardAttribute;
 
         private string Owned;
         private string oldName;
-        private string oldShopDesc;
-        public static string SpecCharRegex = @"^\s*$|[^\w\s:\/'()"",&☆\-!]+\.?$";
-        public static List<string> BanList = new() { "00:00", "NEW", "CANCEL", "COMPLETE!!", "CLEAR!", "OK" };
+        public static string oldShopDesc;
+        public static string SpecCharRegex = @"^\s*$|[.!]+$";
+        public static string TagsRegex = @"<[^>]+>|&nbsp;";
+        public static List<string> BanList = File.ReadAllLines(Path.Combine(Paths.ConfigPath, "TextToClipboard.txt")).ToList();
+        public static List<string> SpecialBanList = new() { "Related Cards" };
 
         private int oldPage = -1;
         private int clampedPage;
@@ -311,9 +319,58 @@ namespace TextToClipboard
         private bool cmExists;
         public static bool searchShopDesc;
 
+        enum Attribute
+        {
+            Ligth = 1,
+            Dark = 2,
+            Water = 3,
+            Fire = 4,
+            Earth = 5,
+            Wind = 6,
+            Divine = 7,
+            Spell = 8,
+            Trap = 9
+        }
+
         private void Update()
         {
-            if(PatchOnSelected.BackButton == null)
+
+            if (searchShopDesc)
+            {
+                string copyText = "";
+
+                timer += Time.deltaTime;
+
+                if (timer < 2)
+                {
+                    GameObject Shop = GameObject.Find("UI/ContentCanvas/ContentManager/ShopBuy");
+
+                    if (Shop != null)
+                    {
+                        GameObject DescTextGO = GameObject.Find("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/Main/MenuArea/MenuAreaTop/");
+
+                        ExtendedTextMeshProUGUI DescText = FindExtendedTextElementInChildren(DescTextGO.transform, false);
+
+                        if (oldShopDesc != DescText.text && !DescText.text.Contains("Lorem ipsum"))
+                        {
+                            copyText = $"{FindExtendedTextElement("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/TitleSafeArea/TitleGroup/CategoryNameText").text} | {FindExtendedTextElement("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/TitleSafeArea/TitleGroup/ProductNameGroup/ProductNameText").text}\n\n{DescText.text}";
+                            oldShopDesc = DescText.text;
+                        }
+                    }
+                }
+
+                if (timer >= 2 || copyText != "")
+                {
+                    searchShopDesc = false;
+                }
+
+                if (copyText.IsNullOrWhiteSpace()) return;
+
+                Plugin.Log.LogInfo(copyText);
+                GUIUtility.systemCopyBuffer = copyText;
+            }
+
+            if (PatchOnSelected.BackButton == null)
             {
                 PatchOnSelected.BackButton = GameObject.Find("UI/ContentCanvas/Header/HeaderUI(Clone)/Root/RootTop/SafeArea/BackButton/");
             }
@@ -353,41 +410,6 @@ namespace TextToClipboard
                 RefreshActualCard();
                 refreshCard = false;
             }
-
-            if (searchShopDesc)
-            {
-                string copyText = "";
-
-                timer += Time.deltaTime;
-
-                if (timer < 2)
-                {
-                    GameObject Shop = GameObject.Find("UI/ContentCanvas/ContentManager/ShopBuy");
-
-                    if (Shop != null)
-                    {
-                        GameObject DescTextGO = GameObject.Find("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/Main/MenuArea/MenuAreaTop/");
-
-                        ExtendedTextMeshProUGUI DescText = FindExtendedTextElementInChildren(DescTextGO.transform, false);
-
-                        if (oldShopDesc != DescText.text)
-                        {
-                            copyText = $"{FindExtendedTextElement("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/TitleSafeArea/TitleGroup/CategoryNameText").text} | {FindExtendedTextElement("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/TitleSafeArea/TitleGroup/ProductNameGroup/ProductNameText").text}\n\n{DescText.text}";
-                            oldShopDesc = DescText.text;
-                        }
-                    }
-                }
-                
-                if(timer >= 2 || copyText != "")
-                {
-                    searchShopDesc = false;
-                }
-
-                if (String.IsNullOrWhiteSpace(copyText)) return;
-
-                Plugin.Log.LogInfo(copyText);
-                GUIUtility.systemCopyBuffer = copyText;
-            }
         }
 
         private void RefreshActualCard()
@@ -396,7 +418,7 @@ namespace TextToClipboard
             {
                 GetUITextElements();
                 string formattedText = FormatCardInfo();
-                GUIUtility.systemCopyBuffer = formattedText;
+                GUIUtility.systemCopyBuffer = formattedText; 
                 oldName = CardName.text;
                 if (SnapContentManager != null) oldPage = SnapContentManager.currentPage;
                 Plugin.Log.LogInfo(formattedText);
@@ -427,7 +449,6 @@ namespace TextToClipboard
             if (SnapContentManager != null)
             {
                 clampedPage = (SnapContentManager.currentPage % 3 + 3) % 3;
-
                 Plugin.Log.LogInfo($"page {clampedPage}");
 
                 CardName = FindUITextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/TitleAreaGroup/TitleArea/NameArea/Viewport/TextCardName/");
@@ -437,6 +458,7 @@ namespace TextToClipboard
                 CardDef = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaBottom/BottomLeftArea/IconDef/TextDef");
                 CardPendulumScale = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaTop/TopLeftArea/IconPendulumScale/TextPendulumScale");
                 CardLink = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaTop/TopLeftArea/IconLink/TextLink");
+                CardAttribute = GetCardAttribute(GameObject.Find($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/TitleAreaGroup/TitleArea/IconAttribute").GetComponent<Image>().sprite.name);
 
                 return;
             }
@@ -450,6 +472,7 @@ namespace TextToClipboard
                 CardDef = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconDef/TextDefTMP");
                 CardPendulumScale = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconPendulumScale/TextPendulumScaleTMP");
                 CardLink = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconLink/TextLinkTMP");
+                CardAttribute = GetCardAttribute(GameObject.Find("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/TitleArea/PlateTitle/IconAttribute").GetComponent<Image>().sprite.name);
 
                 Transform cardOwned = GameObject.Find("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/CardNumGroup/PremiumCardNumGroup/").transform;
                 for (int i = 0; i < cardOwned.childCount; i++)
@@ -467,6 +490,7 @@ namespace TextToClipboard
                 CardDef = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/IconDef/TextDef");
                 CardPendulumScale = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/PendulumScale/TextPendulumScale");
                 CardLink = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/IconLink/TextLink");
+                CardAttribute = GetCardAttribute(GameObject.Find("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/TitleArea/IconAttribute").GetComponent<Image>().sprite.name);
             }
         }
 
@@ -583,11 +607,28 @@ namespace TextToClipboard
             return null;
         }
 
+        private string GetCardAttribute(string attrname)
+        {
+            if (int.TryParse(attrname.Substring(attrname.Length - 2), out int number))
+            {
+                foreach (Attribute attribute in Enum.GetValues(typeof(Attribute)))
+                {
+                    if ((int)attribute == number)
+                    {
+                        return attribute.ToString();
+                    }
+                }
+            }
+
+            return "";
+        }
+
         private string FormatCardInfo()
         {
             if (CardName.text.IsNullOrWhiteSpace()) return "";
             if (Owned.Length > 5) Owned = Owned.Substring(Owned.Length - 6);
             string cardNameText = $"Name: {CardName.text}";
+            string cardAttributeText = $"Attribute: {CardAttribute}";
             string cardOwnedText = Owned.Length > 2 ? $"Owned: {Owned.Remove(Owned.Length - 1)}" : "";
             string cardStarsText = CardStars != null & CardStars.transform.parent.gameObject.activeSelf ? $"Stars: {CardStars.text}" : "";
             string cardLinkText = CardLink != null & CardLink.transform.parent.gameObject.activeSelf ? $"Link level: {CardLink.text}" : "";
@@ -596,9 +637,9 @@ namespace TextToClipboard
             string cardDefText = CardDef != null & CardDef.transform.parent.gameObject.activeSelf ? $"Defense: {CardDef.text}" : "";
             string cardDescriptionText = CardDescription != null ? $"Description: {CardDescription.text}" : "";
 
-            string formattedText = $"{cardNameText}\n{cardOwnedText}\n{cardStarsText}\n{cardLinkText}\n{cardPendulumScaleText}\n{cardAtkText}\n{cardDefText}\n{cardDescriptionText}";
+            string formattedText = $"{cardNameText}\n{cardAttributeText}\n{cardOwnedText}\n{cardStarsText}\n{cardLinkText}\n{cardPendulumScaleText}\n{cardAtkText}\n{cardDefText}\n{cardDescriptionText}";
             Owned = "";
-            return Regex.Replace(formattedText, @"<[^>]+>|&nbsp;", "").Trim();
+            return Regex.Replace(formattedText, TagsRegex, "").Trim();
         }
     }
 }
