@@ -3,8 +3,6 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.Linq;
-using System.IO;
-using System.Threading.Tasks;
 
 using UnityEngine;
 using UnityEngine.UI;
@@ -20,8 +18,6 @@ using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
 
 using Il2CppInterop.Runtime.Injection;
-
-using UniverseLib;
 
 namespace TextToClipboard
 {
