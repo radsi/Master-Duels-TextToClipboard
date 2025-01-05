@@ -287,7 +287,7 @@ namespace TextToClipboard
             }
             catch { }
 
-            if (previewElements.Contains(__instance.name) || ((currentMenu == Menus.DUEL || currentMenu == Menus.SOLO) && (__instance.name.Contains("HandCard") || __instance.name.Contains("Anchor_Far"))))
+            if (previewElements.Contains(__instance.name) || ((currentMenu == Menus.DUEL || currentMenu == Menus.SOLO) && (__instance.name.Contains("HandCard") || __instance.name.Contains("Anchor_") || __instance.name.Equals("DuelListCard(Clone)"))))
             {
                 Instance.Invoke("CopyUI", (currentMenu == Menus.DuelPass ? 1.5f : 0.5f));
                 return;
