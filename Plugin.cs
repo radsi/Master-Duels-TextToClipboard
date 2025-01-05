@@ -286,8 +286,8 @@ namespace TextToClipboard
                 }
             }
             catch { }
-
-            if (previewElements.Contains(__instance.name) || ((currentMenu == Menus.DUEL || currentMenu == Menus.SOLO) && (__instance.name.Contains("HandCard") || __instance.name.Contains("Anchor_") || __instance.name.Equals("DuelListCard(Clone)"))))
+                                                                                                                                // if playing with mouse
+            if (previewElements.Contains(__instance.name) /*|| ((currentMenu == Menus.DUEL || currentMenu == Menus.SOLO) && (__instance.name.Contains("HandCardButton") || __instance.name.Contains("Anchor_") || __instance.name.Contains("DuelListCard(Clone)"))))*/)
             {
                 Instance.Invoke("CopyUI", (currentMenu == Menus.DuelPass ? 1.5f : 0.5f));
                 return;
@@ -359,7 +359,6 @@ namespace TextToClipboard
         [HarmonyPostfix]
         public static void Postfix(ViewController __instance)
         {
-            Plugin.Log.LogInfo(__instance.manager.GetFocusViewController().name);
             if (__instance.manager.GetFocusViewController().name == "Home")
             {
                 currentMenu = Menus.NONE;
@@ -553,10 +552,10 @@ namespace TextToClipboard
 
                 List<(string, string)> ParametersTexts = FindListExtendedTextElement(null, pathPrefix);
 
-                for (int i = 0; i < ParametersTexts.Count; i++)
+                /*for (int i = 0; i < ParametersTexts.Count; i++)
                 {
                     Plugin.Log.LogInfo(ParametersTexts[i]);
-                }
+                }*/
 
                 //Plugin.Log.LogInfo(1);
                 PreviewElement.Instance.Name = ParametersTexts[0].Item2;
@@ -702,13 +701,19 @@ namespace TextToClipboard
         internal static void ProcessSoloMenu(SelectionButton __instance)
         {
             //if (Regex.IsMatch(__instance.name, @"^Anchor_(Near|Far)_(MainDeck|Extra|Exclude|Grave)$")) textToCopy = $"{FindExtendedTextElement(GameObject.Find("UI/ContentCanvas/ContentManager/PopUpText(Clone)(Clone)"))}";
-            if (__instance.name.Contains("Anchor_Near_Monster")) textToCopy = $"Your monster slot {int.Parse(__instance.name.Last().ToString()) + 1}";
+            /*if (__instance.name.Contains("Anchor_Near_Monster")) textToCopy = $"Your monster slot {int.Parse(__instance.name.Last().ToString()) + 1}";
             if (__instance.name.Contains("Anchor_Far_Monster")) textToCopy = $"Opponent's monster slot {int.Parse(__instance.name.Last().ToString()) + 1}";
             if (__instance.name.Contains("Anchor_Near_ExMonster")) textToCopy = $"Ex monster {(__instance.name.Last() == 'R' ? "right" : "left")} slot";
             if (__instance.name.Contains("Anchor_Near_Magic")) textToCopy = $"Your magic slot {int.Parse(__instance.name.Last().ToString()) + 1}";
             if (__instance.name.Contains("Anchor_Far_Magic")) textToCopy = $"Opponent's magic slot {int.Parse(__instance.name.Last().ToString()) + 1}";
             if (__instance.name.Contains("Anchor_Near_FieldMagic")) textToCopy = "Your magic field slot";
-            if (__instance.name.Contains("Anchor_Far_FieldMagic")) textToCopy = "Opponent's magic field slot";
+            if (__instance.name.Contains("Anchor_Far_FieldMagic")) textToCopy = "Opponent's magic field slot";*/
+
+            // if playin with controller
+            if (__instance.name.Contains("HandCardButton") || __instance.name.Contains("Anchor_") || __instance.name.Contains("DuelListCard(Clone)"))
+            {
+                Instance.CopyUI();
+            }
 
             if (__instance.transform.parent.parent.parent.parent.parent.parent.name.Equals("SettingMenuArea"))
             {
@@ -743,7 +748,7 @@ namespace TextToClipboard
 
         internal static void ProcessDecksMenu(SelectionButton __instance)
         {
-
+            // If playing with controller method CopyUI needs to be used
             if(__instance.name.Equals("ImageCard"))
             {
                 //textToCopy = $"Owned: {textToCopy}, rarity: {GetRarity(__instance.transform.Find("IconRarity").GetComponent<Image>().sprite.name)}";
