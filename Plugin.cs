@@ -746,7 +746,8 @@ namespace TextToClipboard
 
             if(__instance.name.Equals("ImageCard"))
             {
-                textToCopy = $"Owned: {textToCopy}, rarity: {GetRarity(__instance.transform.Find("IconRarity").GetComponent<Image>().sprite.name)}";
+                //textToCopy = $"Owned: {textToCopy}, rarity: {GetRarity(__instance.transform.Find("IconRarity").GetComponent<Image>().sprite.name)}";
+                Instance.CopyUI();
             }
 
             if (__instance.transform.parent.parent.parent.name.Equals("Category"))
