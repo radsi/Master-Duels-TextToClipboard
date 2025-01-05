@@ -710,7 +710,7 @@ namespace TextToClipboard
             if (__instance.name.Contains("Anchor_Far_FieldMagic")) textToCopy = "Opponent's magic field slot";*/
 
             // if playin with controller
-            if (__instance.name.Contains("HandCardButton") || __instance.name.Contains("Anchor_") || __instance.name.Contains("DuelListCard(Clone)"))
+            if (__instance.name.Contains("HandCardButton") || __instance.name.Contains("Anchor_") || __instance.name.Contains("DuelListCard(Clone)") || (__instance.name.Contains("Card") && __instance.transform.parent.name.Equals("CardRoot")))
             {
                 Instance.CopyUI();
             }
