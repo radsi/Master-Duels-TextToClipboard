@@ -1,8 +1,8 @@
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
-using System.Linq;
 
 using UnityEngine;
 using UnityEngine.UI;
@@ -10,18 +10,20 @@ using UnityEngine.UI;
 using YgomSystem.UI;
 using YgomSystem.YGomTMPro;
 using YgomGame.Duel;
+using YgomGame.CardBrowser;
 
 using BepInEx;
 using BepInEx.Logging;
-using BepInEx.Unity.IL2CPP;
-
 using HarmonyLib;
-
+using BepInEx.Unity.IL2CPP;
 using Il2CppInterop.Runtime.Injection;
+
+using TMPro;
+using static TextToClipboard.BaseClass;
 
 namespace TextToClipboard
 {
-    [BepInPlugin("someone.texttoclipboard", "TextToClipboard", "1.0.0")]
+    [BepInPlugin("radsi.texttoclipboard", "TextToClipboard", "2.0.0")]
     public class Plugin : BasePlugin
     {
         internal new static ManualLogSource Log;
@@ -29,7 +31,6 @@ namespace TextToClipboard
         public override void Load()
         {
             Log = base.Log;
-
             TryLoad();
         }
 
@@ -42,7 +43,7 @@ namespace TextToClipboard
                 UnityEngine.Object.DontDestroyOnLoad(plugin);
                 plugin.AddComponent<BaseClass>();
                 plugin.hideFlags = HideFlags.HideAndDontSave;
-                new Harmony("someone.texttoclipboard").PatchAll();
+                new Harmony("radsi.texttoclipboard").PatchAll();
 
                 Log.LogInfo("Plugin has been loaded!");
 
@@ -59,264 +60,390 @@ namespace TextToClipboard
         {
             try
             {
-                Log.LogInfo($"Attempting to patch...");
-
+                Log.LogInfo("Attempting to patch...");
                 Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly());
-
-                Log.LogInfo($"Successfully patched!");
+                Log.LogInfo("Successfully patched!");
             }
             catch (Exception e)
             {
-                Log.LogError($"Error registering patch!");
+                Log.LogError("Error registering patch!");
                 Log.LogError(e);
             }
         }
     }
 
+    #region card browser patch
+    [HarmonyPatch(typeof(CardBrowserViewController), nameof(CardBrowserViewController.Start))]
+    class PatchBrowserViewControllerStart
+    {
+        [HarmonyPostfix]
+        static void Postfix(CardBrowserViewController __instance)
+        {
+            BaseClass.SnapContentManager = __instance.GetComponentInChildren<SnapContentManager>();
+        }
+    }
+    #endregion
+
+    #region duel life points patch
+
+    [HarmonyPatch(typeof(DuelLP), nameof(DuelLP.ChangeLP), MethodType.Normal)]
+    class PatchChangeLP
+    {
+        [HarmonyPostfix]
+        private static void Postfix(DuelLP __instance)
+        {
+            CopyText(string.Format("{0} current life points: {1}", __instance.name.Contains("Far") ? "Opponent's" : "Your", __instance.currentLP));
+        }
+    }
+
+    #endregion
+
+    #region buttons patches
+
+    [HarmonyPatch(typeof(ColorContainerImage), nameof(ColorContainerImage.SetColor), MethodType.Normal)]
+    class PatchColorContainerImage
+    {
+        [HarmonyPostfix]
+        private static void Postfix(ColorContainerImage __instance)
+        {
+            try
+            {
+                if (__instance.currentStatusMode != ColorContainer.StatusMode.Enter) return;
+
+                textToCopy = "";
+
+                switch (__instance.transform.parent.parent.parent.name)
+                {
+                    case "DuelMenuButton":
+                        textToCopy = $"Menu button";
+                        break;
+                }
+
+                if (textToCopy != "") CopyText();
+            }
+            catch { }
+        }
+    }
+
+    [HarmonyPatch(typeof(ColorContainerGraphic), nameof(ColorContainerGraphic.SetColor))]
+    class PatchColorContainerGraphic
+    {
+        [HarmonyPostfix]
+        static void Postfix(ColorContainerGraphic __instance)
+        {
+            try
+            {
+                if (__instance.currentStatusMode != ColorContainer.StatusMode.Enter) return;
+
+                textToCopy = "";
+
+                switch (__instance.transform.parent.parent.name)
+                {
+                    case "ButtonMaintenance":
+                        textToCopy = "Maintenance";
+                        break;
+                    case "ButtonBug":
+                        textToCopy = "Issues";
+                        break;
+                    case "ButtonNotification":
+                        textToCopy = "Notification";
+                        break;
+                    case "InputButton":
+                        if (__instance.transform.parent.parent.name.Equals("NameAreaGroup") || currentMenu == Menus.NONE)
+                        {
+                            textToCopy = "Rename button/input";
+                        }
+                        else
+                        {
+                            textToCopy = "Search card input";
+                        }
+                        break;
+                    case "AutoBuildButton":
+                        textToCopy = "Auto-build button";
+                        break;
+                    case "ButtonBookmark": // add bookmark
+                        textToCopy = "Add card to bookmark button";
+                        break;
+                    case "BookmarkButton": // bookmark menu
+                        textToCopy = "Bookmarked cards button";
+                        break;
+                    case "HowToGetButton":
+                        textToCopy = "How to get button";
+                        break;
+                    case "RelatedCard":
+                        textToCopy = "Related cards button";
+                        break;
+                    case "DismantleButton":
+                        string dismantle = FindExtendedTextElement(__instance.transform.parent.parent.GetChild(6).gameObject);
+                        textToCopy = $"{(string.IsNullOrEmpty(dismantle) ? "Cant be dismantled" : $"Dismantle card for: {FindExtendedTextElement(__instance.transform.parent.parent.GetChild(6).gameObject)} {GetRarity(__instance.transform.parent.parent.GetChild(6).GetComponentInChildren<Image>().sprite.name)} cp")}";
+                        break;
+                    case "CreateButton":
+                        textToCopy = $"Create card for: {FindExtendedTextElement(__instance.transform.parent.parent.GetChild(6).gameObject)} {GetRarity(__instance.transform.parent.parent.GetChild(6).GetComponentInChildren<Image>().sprite.name)} cp";
+                        break;
+                    case "AddButton":
+                        textToCopy = "Add +1";
+                        break;
+                    case "RemoveButton":
+                        textToCopy = "Remove -1";
+                        break;
+                    case "CardListButton":
+                        textToCopy = "Card list button";
+                        break;
+                    case "HistotyButton": // they dont know how to write "history"
+                        textToCopy = "Card history button";
+                        break;
+                    case "ButtonRegulation":
+                        textToCopy = "Regulation button";
+                        break;
+                    case "ButtonSecretPack":
+                        textToCopy = "Secret pack button";
+                        break;
+                    case "ButtonInfoSwitching":
+                        textToCopy = "Switch display mode button";
+                        break;
+                    case "ButtonSave":
+                        textToCopy = "Save button";
+                        break;
+                    case "ButtonMenu":
+                        textToCopy = "Menu button";
+                        break;
+                    case "ButtonPickupCard":
+                        textToCopy = "Show cards on decks preview";
+                        break;
+                    case "BulkDecksDeletionButton":
+                        textToCopy = "Bulk deck deletion button";
+                        break;
+                    case "ButtonOpenNeuronDecks":
+                        textToCopy = "Link with Yu Gi Oh Database";
+                        break;
+                    case "FilterButton":
+                        textToCopy = "Filters button";
+                        break;
+                    case "SortButton":
+                        textToCopy = "Sort button";
+                        break;
+                    case "ClearButton":
+                        textToCopy = "Clear filters button";
+                        break;
+                    case "Button0":
+                        textToCopy = $"{FindExtendedTextElement(__instance.transform.parent.parent.parent.gameObject)}, lower to higher";
+                        break;
+                    case "Button1":
+                        textToCopy = $"{FindExtendedTextElement(__instance.transform.parent.parent.parent.gameObject)}, higher to lower";
+                        break;
+                    case "ButtonDismantleIncrement":
+                        textToCopy = "Increment dismantle amount";
+                        break;
+                    case "ButtonDismantleDecrement":
+                        textToCopy = "Decrement dismantle amount";
+                        break;
+                    case "ButtonEnter":
+                        textToCopy = "Play";
+                        break;
+                    case "CopyButton":
+                        textToCopy = "Copy deck button";
+                        break;
+                }
+
+                switch (__instance.transform.parent.parent.parent.name)
+                {
+                    case "TabMyDeck":
+                        textToCopy = "My Deck";
+                        break;
+                    case "TabRental":
+                        textToCopy = "Loaner";
+                        break;
+                    case "ChapterDuel(Clone)":
+                        textToCopy = $"Duel, {FindExtendedTextElement(__instance.transform.parent.parent.GetChild(4).gameObject)} stars";
+                        break;
+                    case "DuelMenuButton":
+                        textToCopy = $"Menu button";
+                        break;
+                }
+
+                if (textToCopy != "") CopyText();
+            }
+            catch { }
+        }
+    }
+
+
     [HarmonyPatch(typeof(SelectionButton), nameof(SelectionButton.OnClick), MethodType.Normal)]
     class PatchOnClick
     {
-        static Dictionary<string, string> menuNames = new Dictionary<string, string>
-        {
-            { "DUEL", "D" },
-            { "DECK", "K" },
-            { "SOLO", "S" },
-            { "SHOP", "H" },
-            { "Missions", "M" }
-        };
-        public enum Menus
-        {
-            NONE = 0,
-            DUEL = 'D',
-            DECK = 'K',
-            SOLO = 'S',
-            SHOP = 'H',
-            Missions = 'M'
-        }
-        public static Menus currentMenu = Menus.NONE;
-
-        public static string copyText = "";
+        static List<string> previewElements = new() { "CreateButton", "ImageCard", "NextButton", "PrevButton", "Related Cards", "ThumbButton", "SlotTemplate(Clone)", "Locator", "GoldpassRewardButton", "NormalpassRewardButton", "ButtonDuelPass" };
 
         [HarmonyPostfix]
         static void Postfix(SelectionButton __instance)
         {
             try
             {
-                copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
-
-                if (menuNames.ContainsKey(copyText))
+                if (menuNames.TryGetValue(FindExtendedTextElement(__instance.gameObject), out Menus menu))
                 {
-                    currentMenu = (Menus)Enum.Parse(typeof(Menus), menuNames.Keys.ToList().Find(k => k == copyText));
+                    currentMenu = menu;
+                    menusRecord.Add(menu);
+                    textRecord.Clear();
                 }
             }
-            catch
+            catch { }
+
+            if (previewElements.Contains(__instance.name) || ((currentMenu == Menus.DUEL || currentMenu == Menus.SOLO) && __instance.name.Contains("HandCard")))
             {
-
+                Instance.Invoke("CopyUI", (currentMenu == Menus.DuelPass ? 1.5f : 0.5f));
+                return;
             }
-
-            copyText = "";
-
-            switch (currentMenu)
-            {
-                case Menus.NONE:
-                    if (__instance.name == "BackButton") return;
-                    break;
-                case Menus.DUEL:
-                    if (__instance.name == "BackButton") return;
-                    try
-                    {
-                        if (__instance.transform.GetChild(4).gameObject.activeSelf || !__instance.transform.parent.transform.name.Contains("Content"))
-                        {
-                            copyText = $"{(__instance.transform.parent.parent.name.Contains("View") ? "Chooice" : "Option")}: {BaseClass.FindExtendedTextElement(__instance.transform, true).text}";
-                            copyText += $", {BaseClass.FindExtendedTextElement(__instance.transform.GetChild(3), true).text}";
-                        }
-                    }
-                    catch
-                    {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform.parent.parent.parent.parent.parent.parent.parent, true).text;
-                    }
-                    
-                    break;
-
-                case Menus.DECK:
-                    if (__instance.name == "BackButton") return;
-                    if (__instance.name == "Button")
-                    {
-                        copyText = $"{BaseClass.FindExtendedTextElement(__instance.transform, true).text}\n{BaseClass.FindExtendedTextElement("UI/ContentCanvas/ContentManager/ProfileEdit/ProfileEditUI(Clone)/Root/ProfileArea/MainArea/RootView/ItemNameText").text}";
-                    }
-
-                    break;
-
-                case Menus.SOLO:
-                    if (__instance.name == "BackButton") return;
-                    break;
-
-                case Menus.SHOP:
-                    if (__instance.name == "BackButton") return;
-                    BaseClass.searchShopDesc = true;
-                    BaseClass.timer = 0f;
-                    break;
-
-                case Menus.Missions:
-                    if (__instance.name == "BackButton") return;
-                    break;
-            }
-
-            if (Regex.IsMatch(copyText, BaseClass.SpecCharRegex, RegexOptions.IgnoreCase) || BaseClass.SpecialBanList.Contains(copyText)) return;
-            copyText = Regex.Replace(copyText, BaseClass.TagsRegex, "").Trim();
-            Plugin.Log.LogInfo(copyText);
-
-            GUIUtility.systemCopyBuffer = copyText;
         }
     }
 
     [HarmonyPatch(typeof(SelectionButton), nameof(SelectionButton.OnSelected), MethodType.Normal)]
     class PatchOnSelected
     {
-        static SelectionButton oldButton;
-        public static GameObject BackButton;
-
-        public static string copyText;
-
         [HarmonyPostfix]
         static void Postfix(SelectionButton __instance)
         {
-            if (oldButton == __instance || !__instance.isSelected || __instance.name == "BackButton") return;
+            textToCopy = FindExtendedTextElement(__instance.gameObject);
 
-            if (!BackButton.activeSelf) PatchOnClick.currentMenu = PatchOnClick.Menus.NONE;
-
-            switch (PatchOnClick.currentMenu)
+            switch (currentMenu)
             {
-                case PatchOnClick.Menus.NONE:
-                    try
-                    {
-                        if (__instance.name == "ButtonBanner") return;
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
-                    }
-                    catch
-                    {
-
-                    }
-
+                case Menus.NONE:
+                    ProcessNotificationsPopup(__instance);
+                    ProcessFriendsMenu(__instance);
+                    ProcessProfile(__instance);
+                    ProcessDailyReward(__instance);
+                    ProcessEventBanner(__instance);
+                    ProcessTopicsBanner(__instance);
                     break;
-                case PatchOnClick.Menus.DUEL:
-                    try
-                    {
-                        copyText = $"{(__instance.transform.parent.parent.name.Contains("View") ? "Chooice" : "Option")}: {BaseClass.FindExtendedTextElement(__instance.transform, true).text}";
-
-                        if (__instance.transform.GetChild(4).gameObject.activeSelf || !__instance.transform.parent.transform.name.Contains("Content"))
-                        {
-                            copyText += $", {BaseClass.FindExtendedTextElement(__instance.transform.GetChild(3), true).text}";
-                        }
-                    }
-                    catch
-                    {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
-                    }
+                case Menus.Settings:
+                    ProcessSettingsMenu(__instance);
                     break;
-
-                case PatchOnClick.Menus.DECK:
-                    try
-                    {
-                        if(__instance.transform.childCount >= 6)
-                        {
-                            if (__instance.transform.GetChild(6).gameObject.activeSelf && __instance.transform.GetChild(6).name.Contains("IconAddDeck")) return;
-                        }
-                        copyText = $"{(__instance.name == "Body" ? "Deck: " : "")}{BaseClass.FindExtendedTextElement(__instance.transform, true).text}";
-                    }
-                    catch
-                    {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform.parent.parent.parent.parent.GetChild(0), true).text;
-                    }
-
+                case Menus.Notifications:
+                    ProcessNotifications(__instance);
                     break;
-
-                case PatchOnClick.Menus.SOLO:
-                    try
-                    {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
-                    }
-                    catch
-                    {
-
-                    }
+                case Menus.Missions:
+                    ProcessMissionsMenu(__instance);
                     break;
-
-                case PatchOnClick.Menus.SHOP:
-                    try
-                    {
-                        copyText = $"Shop item: {BaseClass.FindExtendedTextElement(__instance.transform.GetChild(2).GetChild(0).GetChild(0), true).text}";
-                    }
-                    catch
-                    {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
-                    }
+                case Menus.SHOP:
+                    ProcessPacks(__instance);
                     break;
-                case PatchOnClick.Menus.Missions:
-                    try
-                    {
-                        copyText = $"{BaseClass.FindExtendedTextElement(__instance.transform.parent.parent.parent.parent.parent.parent.parent.parent.parent, true).text} - {BaseClass.FindExtendedTextElement(__instance.transform, true).text}";
-                    }
-                    catch
-                    {
-                        copyText = BaseClass.FindExtendedTextElement(__instance.transform, true).text;
-                    }
+                case Menus.DuelPass:
+                    ProcessDuelPass(__instance);
+                    break;
+                case Menus.DECK:
+                    ProcessDecksMenu(__instance);
+                    ProcessNewDeck(__instance);
+                    break;
+                case Menus.SOLO:
+                    ProcessSoloMenu(__instance);
                     break;
             }
 
-            if (Regex.IsMatch(copyText, BaseClass.SpecCharRegex, RegexOptions.IgnoreCase) || BaseClass.SpecialBanList.Contains(copyText)) return;
-            copyText = Regex.Replace(copyText, BaseClass.TagsRegex, "").Trim();
-            Plugin.Log.LogInfo(copyText);
-
-            GUIUtility.systemCopyBuffer = copyText;
-            oldButton = __instance;
+            CopyText();
         }
     }
 
-    [HarmonyPatch(typeof(DuelLP), nameof(DuelLP.ChangeLP), MethodType.Normal)]
-    class PatchChangeLP
+    [HarmonyPatch(typeof(SelectionButton), nameof(SelectionButton.OnDeselected), MethodType.Normal)]
+    class PatchOnDeselected
     {
         [HarmonyPostfix]
-        static void Postfix(DuelLP __instance)
+        static void Postfix(SelectionButton __instance)
         {
-            string text = $"{(__instance.name.Contains("Far") ? "Enemy" : "Your")} current life points: {__instance.currentLP}";
-            GUIUtility.systemCopyBuffer = text;
-            Plugin.Log.LogInfo(text);
+            DeselectButton();
         }
     }
+
+    #endregion
+
+    [HarmonyPatch(typeof(ViewController), nameof(ViewController.OnBack))]
+    class PatchViewController
+    {
+        [HarmonyPostfix]
+        public static void Postfix(ViewController __instance)
+        {
+            Plugin.Log.LogInfo(__instance.manager.GetFocusViewController().name);
+            if (__instance.manager.GetFocusViewController().name == "Home")
+            {
+                currentMenu = Menus.NONE;
+                menusRecord.Clear();
+            }
+        }
+    }
+
 
     public class BaseClass : MonoBehaviour
     {
-        SnapContentManager SnapContentManager;
+        public static BaseClass Instance;
 
-        private RubyTextGX CardName;
-        private ExtendedTextMeshProUGUI CardDescription;
-        private ExtendedTextMeshProUGUI CardLink;
-        private ExtendedTextMeshProUGUI CardStars;
-        private ExtendedTextMeshProUGUI CardAtk;
-        private ExtendedTextMeshProUGUI CardDef;
-        private ExtendedTextMeshProUGUI CardPendulumScale;
-        private ExtendedTextMeshProUGUI CardAttributes;
-        private string CardElement;
+        public static List<string> textRecord = new List<string>();
+        public static List<string> itemsRecord = new List<string>();
+        public static List<Menus> menusRecord = new List<Menus>();
 
-        private string Owned;
-        private string oldName;
-        public static string oldShopDesc;
-        public static string SpecCharRegex = @"^\s*$|[.!]+$";
-        public static string TagsRegex = @"<[^>]+>|&nbsp;";
-        public static List<string> BanList = new() { "00:00", "NEW", "CANCEL", "OK" };
-        public static List<string> SpecialBanList = new() { "Related Cards" };
+        public static Dictionary<string, Menus> menuNames = new()
+        {
+            { "DUEL", Menus.DUEL },
+            { "DECK", Menus.DECK },
+            { "SOLO", Menus.SOLO },
+            { "SHOP", Menus.SHOP },
+            { "MISSION", Menus.Missions },
+            { "Notifications", Menus.Notifications },
+            { "Game Settings", Menus.Settings },
+            { "Duel Pass", Menus.DuelPass }
+        };
 
-        private int oldPage = -1;
-        private int clampedPage;
+        public enum Menus { NONE, DUEL, DECK, SOLO, SHOP, Missions, Notifications, Settings, DuelPass }
+        public static Menus currentMenu = Menus.NONE;
 
-        public static float timer = 0f;
+        public class PreviewElement
+        {
+            private static PreviewElement _instance;
 
-        private bool refreshCard;
-        private bool cmExists;
-        public static bool searchShopDesc;
+            public static PreviewElement Instance
+            {
+                get
+                {
+                    if (_instance == null)
+                    {
+                        _instance = new PreviewElement();
+                    }
+                    return _instance;
+                }
+            }
 
-        enum Attribute
+            public string Name { get; set; } = string.Empty;
+            public string Description { get; set; } = string.Empty;
+            public string Link { get; set; } = string.Empty;
+            public string Stars { get; set; } = string.Empty;
+            public string Atk { get; set; } = string.Empty;
+            public string Def { get; set; } = string.Empty;
+            public string PendulumScale { get; set; } = string.Empty;
+            public string Attributes { get; set; } = string.Empty;
+            public string SpellType { get; set; } = string.Empty;
+            public string Element { get; set; } = string.Empty;
+            public string Owned { get; set; } = string.Empty;
+            public string TimeLeft { get; set; } = string.Empty;
+            public string Price { get; set; } = string.Empty;
+
+            public void Clear()
+            {
+                foreach (PropertyInfo property in GetType().GetProperties())
+                {
+                    if (property.PropertyType == typeof(string))
+                    {
+                        property.SetValue(this, string.Empty);
+                    }
+                }
+            }
+
+            public void LogValues()
+            {
+                foreach (PropertyInfo property in GetType().GetProperties())
+                {
+                    Console.WriteLine($"{property.Name}: {property.GetValue(this)}");
+                }
+            }
+        }
+
+
+        private enum Attribute
         {
             Light = 1,
             Dark = 2,
@@ -324,322 +451,555 @@ namespace TextToClipboard
             Fire = 4,
             Earth = 5,
             Wind = 6,
-            Divine = 7,
-            Spell = 8,
-            Trap = 9
+            Divine = 7
         }
 
-        private void Update()
+        private enum Rarity
         {
+            Normal = 0,
+            Rare = 1,
+            SuperRare = 2,
+            UltraRare = 3
+        }
 
-            if (searchShopDesc)
+        public static List<string> bannedText = new(){ "00:00", "You can add new Cards to your Deck." };
+        public static float timer = 0f;
+        public static bool searchShopDesc;
+        public static string textToCopy;
+        public static string old_copiedText;
+
+        public static DateTime lastExecutionTime;
+        public static readonly TimeSpan cooldown = TimeSpan.FromSeconds(0.1f);
+
+        #region ui related stuff 
+
+        public static SnapContentManager SnapContentManager;
+        public static int clampedPage;
+        
+        public void Awake()
+        {
+            Instance = this;
+        }
+
+        internal static void CopyText(string text = "")
+        {
+            if (text == "") text = textToCopy;
+
+            if (DateTime.Now - lastExecutionTime >= cooldown)
             {
-                string copyText = "";
-
-                timer += Time.deltaTime;
-
-                if (timer < 2)
+                lastExecutionTime = DateTime.Now;
+                if (!string.IsNullOrEmpty(old_copiedText) && old_copiedText.Contains(text)) return;
+                if (!string.IsNullOrEmpty(text.Trim()) || !bannedText.Contains(text))
                 {
-                    GameObject Shop = GameObject.Find("UI/ContentCanvas/ContentManager/ShopBuy");
+                    text = Regex.Replace(text, @"<[^>]+>", "");
+                    Plugin.Log.LogInfo($"text copied: {text}");
+                    GUIUtility.systemCopyBuffer = text;
+                }
+                textRecord.Add(text);
+                old_copiedText = text;
+            }
+        }
 
-                    if (Shop != null)
+        public static void GetUITextElements()
+        {
+            switch (currentMenu)
+            {
+                case Menus.DuelPass:
+                    if (textRecord.Count == 0)
                     {
-                        GameObject DescTextGO = GameObject.Find("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/Main/MenuArea/MenuAreaTop/");
-
-                        ExtendedTextMeshProUGUI DescText = FindExtendedTextElementInChildren(DescTextGO.transform, false);
-
-                        if (oldShopDesc != DescText.text && !DescText.text.Contains("Lorem ipsum"))
-                        {
-                            copyText = $"{FindExtendedTextElement("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/TitleSafeArea/TitleGroup/CategoryNameText").text} | {FindExtendedTextElement("UI/ContentCanvas/ContentManager/ShopBuy/ShopBuyUI(Clone)/Root/TitleSafeArea/TitleGroup/ProductNameGroup/ProductNameText").text}\n\n{DescText.text}";
-                            oldShopDesc = DescText.text;
-                        }
+                        textToCopy = $"Pass grade: {FindExtendedTextElement(null, "UI/ContentCanvas/ContentManager/DuelPass/DuelPassUI(Clone)/DuelPassArea/RootInfo/GradeAreaWidget/TextDuelPassLevel0")}, Time left: {FindExtendedTextElement(null, "UI/ContentCanvas/ContentManager/DuelPass/DuelPassUI(Clone)/DuelPassArea/RootInfo/LimitArea/LimitDateBase/LimitDateTextTMP")}";
+                        return;
                     }
-                }
-
-                if (timer >= 2 || copyText != "")
-                {
-                    searchShopDesc = false;
-                }
-
-                if (copyText.IsNullOrWhiteSpace()) return;
-
-                Plugin.Log.LogInfo(copyText);
-                GUIUtility.systemCopyBuffer = copyText;
+                break;
+                case Menus.DECK:
+                    if (textRecord.Last().Contains("Create card"))
+                    {
+                        if (FindExtendedTextElement(null, "UI/OverlayCanvas/DialogManager/CommonDialog/CommonDialogUI(Clone)/Window/Content/TitleGrp/Text").Contains("Unable"))
+                            textToCopy = "Unable to create card";
+                        CopyText();
+                    }
+                    break;
             }
 
-            if (PatchOnSelected.BackButton == null)
-            {
-                PatchOnSelected.BackButton = GameObject.Find("UI/ContentCanvas/Header/HeaderUI(Clone)/Root/RootTop/SafeArea/BackButton/");
-            }
+            // check if its an item preview
 
-            if (Input.GetKeyDown(KeyCode.E))
+            if (SnapContentManager == null && !(currentMenu == Menus.DECK || currentMenu == Menus.SOLO || currentMenu == Menus.DUEL))
             {
-                ResetVars();
-            }
-
-            if(SnapContentManager == null)
-            {
-                var _SnapContentManager = GameObject.Find("UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/");
-                if (_SnapContentManager != null) { SnapContentManager = _SnapContentManager.GetComponent<SnapContentManager>(); cmExists = true; }
-            }
-            else
-            {
-                if (oldPage != SnapContentManager.currentPage) refreshCard = true;
-            }
-
-            if (CardName == null)
-            {
-                GetUITextElements();
-            }
-            else 
-            {
-                if (!GameObject.Find("UI/OverlayCanvas/DialogManager/CardBrowser/") && cmExists)
-                {
-                    cmExists = false;
-                    SnapContentManager = null;
-                    CardName = null;
-                }
-                if (oldName != CardName.text) refreshCard = true;
-            }
-
-            if (refreshCard)
-            {
-                RefreshActualCard();
-                refreshCard = false;
-            }
-        }
-
-        private void RefreshActualCard()
-        {
-            try
-            {
-                GetUITextElements();
-                string formattedText = FormatCardInfo();
-                GUIUtility.systemCopyBuffer = formattedText; 
-                oldName = CardName.text;
-                if (SnapContentManager != null) oldPage = SnapContentManager.currentPage;
-                Plugin.Log.LogInfo(formattedText);
-            }
-            catch
-            {
-                ResetVars();
-            }
-        }
-
-        private void ResetVars()
-        {
-            cmExists = false;
-            refreshCard = false;
-            searchShopDesc = false;
-            timer = 0f;
-            clampedPage = -1;
-            oldPage = -1;
-            oldName = "";
-            oldShopDesc = "";
-            Owned = "";
-            SnapContentManager = null;
-            CardName = null;
-        }
-
-        private void GetUITextElements()
-        {
-            if (SnapContentManager != null)
-            {
-                clampedPage = (SnapContentManager.currentPage % 3 + 3) % 3;
-                Plugin.Log.LogInfo($"page {clampedPage}");
-
-                CardName = FindUITextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/TitleAreaGroup/TitleArea/NameArea/Viewport/TextCardName/");
-                CardDescription = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/DescriptionArea/TextArea/Viewport/TextDescriptionValue/");
-                CardStars = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaTop/TopLeftArea/IconLevel/TextLevel");
-                CardAtk = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaBottom/BottomLeftArea/IconAtk/TextAtk");
-                CardDef = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaBottom/BottomLeftArea/IconDef/TextDef");
-                CardPendulumScale = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaTop/TopLeftArea/IconPendulumScale/TextPendulumScale");
-                CardLink = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/ParamatorArea/ParamatorAreaTop/TopLeftArea/IconLink/TextLink");
-                CardElement = GetCardElement(GameObject.Find($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/TitleAreaGroup/TitleArea/IconAttribute").GetComponent<Image>().sprite.name);
-                CardAttributes = FindExtendedTextElement($"UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){clampedPage}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea/DescriptionArea/TitleBase/TextDescriptionItem");
+                List<(string, string)> textElements = FindListExtendedTextElement(null, "UI/OverlayCanvas/DialogManager/ItemPreview/ItemPreviewUI(Clone)/Root/RootMainArea/DescArea/RootDesc/", false);
+                PreviewElement.Instance.Name = $"{(textElements.Count > 2 ? $"{textElements.First().Item2} - " : "")}{textElements[textElements.Count - 2].Item2}";
+                PreviewElement.Instance.Description = textElements.Last().Item2;
                 return;
             }
 
-            if (GameObject.Find("UI/ContentCanvas/ContentManager/DeckEdit/"))
+            var pathConditions = new List<(string PathPrefix, bool Condition)>
             {
-                CardName = FindUITextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/TitleArea/PlateTitle/NameArea/Viewport/TextCardName/");
-                CardDescription = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/DescriptionArea/TextArea/Viewport/TextDescriptionValueTMP/");
-                CardStars = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconLevel/TextLevelTMP");
-                CardAtk = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconAtk/TextAtkTMP");
-                CardDef = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconDef/TextDefTMP");
-                CardPendulumScale = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconPendulumScale/TextPendulumScaleTMP");
-                CardLink = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/IconLink/TextLinkTMP");
-                CardElement = GetCardElement(GameObject.Find("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/TitleArea/PlateTitle/IconAttribute").GetComponent<Image>().sprite.name);
-                CardAttributes = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/DescriptionArea/PlateDescription/TextDescriptionItemTMP");
+                ("UI/OverlayCanvas/DialogManager/CardBrowser/CardBrowserUI(Clone)/Scroll View/Viewport/Content/Template(Clone){0}/CardInfoDetail_Browser(Clone)/Root/Window/StatusArea", SnapContentManager != null),
+                ("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window", GameObject.Find("UI/ContentCanvas/ContentManager/DeckEdit/") != null),
+                ("UI/ContentCanvas/ContentManager/DeckBrowser/DeckBrowserUI(Clone)/Root/CardDetail/Root/Window", GameObject.Find("UI/ContentCanvas/ContentManager/DeckBrowser/") != null),
+                ("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window", true)
+            };
 
-                Transform cardOwned = GameObject.Find("UI/ContentCanvas/ContentManager/DeckEdit/DeckEditUI(Clone)/CardDetail/Root/Window/ParameterArea/CardNumGroup/PremiumCardNumGroup/").transform;
-                for (int i = 0; i < cardOwned.childCount; i++)
+            foreach (var pathCondition in pathConditions)
+            {
+                if (!pathCondition.Condition) continue;
+
+                string pathPrefix = pathCondition.PathPrefix;
+
+                if (pathCondition.PathPrefix == pathConditions[0].PathPrefix)
                 {
-                    if (i % 2 == 0) continue;
-                    Owned += FindExtendedTextElement(cardOwned.GetChild(i), true).text + "/";
+                    clampedPage = (SnapContentManager.currentPage % 3 + 3) % 3;
+                    pathPrefix = string.Format(pathCondition.PathPrefix, clampedPage);
                 }
+
+                List<(string, string)> ParametersTexts = FindListExtendedTextElement(null, pathPrefix);
+
+                for (int i = 0; i < ParametersTexts.Count; i++)
+                {
+                    Plugin.Log.LogInfo(ParametersTexts[i]);
+                }
+
+                //Plugin.Log.LogInfo(1);
+                PreviewElement.Instance.Name = ParametersTexts[0].Item2;
+                if (itemsRecord.Find(e => e.Contains(PreviewElement.Instance.Name)) != null) return;
+                //Plugin.Log.LogInfo(2);
+                PreviewElement.Instance.Description = ParametersTexts.Find(e => e.Item1.Contains("DescriptionValue")).Item2 ?? "";
+                //Plugin.Log.LogInfo(3);
+                PreviewElement.Instance.Stars = ParametersTexts.Find(e => e.Item1.Contains("Rank") || e.Item1.Contains("Level")).Item2 ?? "";
+                //Plugin.Log.LogInfo(4);
+                PreviewElement.Instance.Atk = ParametersTexts.Find(e => e.Item1.Contains("Atk")).Item2 ?? "";
+                //Plugin.Log.LogInfo(5);
+                PreviewElement.Instance.Def = ParametersTexts.Find(e => e.Item1.Contains("Def")).Item2 ?? "";
+                //Plugin.Log.LogInfo(6);
+                PreviewElement.Instance.PendulumScale = ParametersTexts.Find(e => e.Item1.Contains("Pendulum")).Item2 ?? "";
+                //Plugin.Log.LogInfo(7);
+                PreviewElement.Instance.Link = ParametersTexts.Find(e => e.Item1.Contains("Link")).Item2 ?? "";
+                //Plugin.Log.LogInfo(8);
+                PreviewElement.Instance.Element = GetElement(GameObject.Find($"{pathPrefix}/{(pathConditions[0].Condition == false ? (pathConditions[1].Condition ? "TitleArea/PlateTitle/IconAttribute" : "TitleArea/AttributeRoot/IconAttribute") : "TitleAreaGroup/TitleArea/IconAttribute")}").GetComponent<Image>().sprite.name) ?? "";
+                //Plugin.Log.LogInfo(9);
+                PreviewElement.Instance.Attributes = ParametersTexts.Find(e => e.Item1.Contains("DescriptionItem")).Item2 ?? "";
+                //Plugin.Log.LogInfo(10);
+                PreviewElement.Instance.SpellType = ParametersTexts.Find(e => e.Item1.Contains("SpellTrap")).Item2 ?? "";
+
+                if (pathPrefix == pathConditions[1].PathPrefix)
+                {
+                    PreviewElement.Instance.Owned = (ParametersTexts.Find(e => e.Item1.Contains("CardNum")).Item2 ?? "") + "/";
+                }
+
+                break;
+            }
+        }
+
+        public static string FormatInfo()
+        {
+            if (itemsRecord.Find(e => e.Contains(PreviewElement.Instance.Name)) != null) return itemsRecord.Find(e => e.Contains(PreviewElement.Instance.Name));
+
+            if (string.IsNullOrWhiteSpace(PreviewElement.Instance.Name)) return string.Empty;
+
+            string owned = PreviewElement.Instance.Owned;
+
+            if (owned.Length > 5) owned = owned[^6..];
+
+            // Add main parameters
+            List<string> resultList = new();
+
+            if (!string.IsNullOrEmpty(PreviewElement.Instance.Name))
+                resultList.Add($"Name: {PreviewElement.Instance.Name}");
+
+            if (!string.IsNullOrEmpty(PreviewElement.Instance.Description))
+                resultList.Add($"Description: {PreviewElement.Instance.Description}");
+
+            // Check if it's not an item preview to add the rest of parameters
+            if (SnapContentManager != null || currentMenu == Menus.SOLO || currentMenu == Menus.DUEL || currentMenu == Menus.DECK)
+            {
+                resultList = new List<string>
+                {
+                    !string.IsNullOrEmpty(PreviewElement.Instance.Name) ? $"Name: {PreviewElement.Instance.Name}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.Atk) ? $"Attack: {PreviewElement.Instance.Atk}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.Link) ? $"Link level: {PreviewElement.Instance.Link}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.Def) ? $"Defense: {PreviewElement.Instance.Def}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.Stars) ? $"Stars: {PreviewElement.Instance.Stars}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.Element) ? $"Element: {PreviewElement.Instance.Element}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.PendulumScale) ? $"Pendulum scale: {PreviewElement.Instance.PendulumScale}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.Attributes) ? $"Attributes: {(currentMenu == Menus.DECK ? PreviewElement.Instance.Attributes[1..^1] : PreviewElement.Instance.Attributes)}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.SpellType) ? $"Spell type: {PreviewElement.Instance.SpellType}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.Owned) ? $"Owned: {PreviewElement.Instance.Owned.TrimEnd('/')}" : null,
+                    !string.IsNullOrEmpty(PreviewElement.Instance.Description) ? $"Description: {PreviewElement.Instance.Description}" : FindExtendedTextElement(null, "UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/DescriptionArea/TextArea/Viewport/TextDescriptionValue/"),
+                };
+            }
+            else if (currentMenu == Menus.SHOP) // Its a card pack
+            {
+                resultList = new List<string>
+                {
+                    $"Name: {PreviewElement.Instance.Name}",
+                    $"Category: {PreviewElement.Instance.Description}",
+                    $"Time left: {PreviewElement.Instance.TimeLeft}",
+                    $"Price: {PreviewElement.Instance.Price}",
+                };
+            }
+
+            PreviewElement.Instance.Clear();
+            resultList = resultList.Where(item => item?.Trim() != null).ToList();
+            itemsRecord.Add(string.Join("\n", resultList));
+
+            return string.Join("\n", resultList);
+        }
+
+        #endregion
+
+        #region buttons related stuff
+
+        public void CopyUI()
+        {
+            GetUITextElements();
+            CopyText(FormatInfo());
+        }
+       
+        internal static void DeselectButton()
+        {
+            old_copiedText = "";
+        }
+
+        internal static void ProcessProfile(SelectionButton __instance)
+        {
+            if (__instance.name.Equals("ButtonPlayer")) textToCopy += $", level {FindExtendedTextElement(__instance.transform.GetChild(0).GetChild(1).GetChild(1).GetChild(1).gameObject, null, false)}";
+        }
+
+        internal static void ProcessFriendsMenu(SelectionButton __instance)
+        {
+            switch (__instance.name)
+            {
+                case "SearchButton":
+                    textToCopy = "Add friend button";
+                    break;
+                case "OpenToggle":
+                    textToCopy = FindExtendedTextElement(__instance.transform.parent.gameObject);
+                    break;
+            }
+
+        }
+
+        internal static void ProcessDailyReward(SelectionButton __instance)
+        {
+            if (textToCopy.Equals("Day")) textToCopy += $" {FindExtendedTextElement(__instance.transform.GetChild(3).GetChild(1).gameObject)}, Recieved: {(__instance.transform.Find("RecievedCover").gameObject.activeInHierarchy ? "Yes" : "No")}";
+        }
+
+        internal static void ProcessPacks(SelectionButton __instance)
+        {
+            if (!__instance.transform.parent.name.Contains("Shop")) return;
+
+            List<(string, string)> ParametersTexts = new();
+
+            ParametersTexts = FindListExtendedTextElement(__instance.gameObject);
+
+            PreviewElement.Instance.Name = $"{ParametersTexts.Find(e => e.Item1.Contains("PickupMessage")).Item2 ?? ""} - {ParametersTexts.Find(e => e.Item1.Contains("Name")).Item2} ({ParametersTexts.Find(e => e.Item1.Contains("New")).Item2 ?? ""})";
+            PreviewElement.Instance.Description = $"{FindExtendedTextElement(null, "UI/ContentCanvas/ContentManager/Shop/ShopUI(Clone)/Root/Main/ProductsRoot/ShowcaseWidget/ListRoot/ProductList/Viewport/Mask/Content/ShopGroupHeaderWidget(Clone)/Label", false)}";
+            PreviewElement.Instance.TimeLeft = $"{ParametersTexts.Find(e => e.Item1.Contains("Limit")).Item2 ?? "None"}";
+            PreviewElement.Instance.Price = $"{ParametersTexts.Find(e => e.Item1.Contains("PriceGroup")).Item2 ?? ""}";
+
+            CopyText(FormatInfo());
+        }
+
+        internal static void ProcessSoloMenu(SelectionButton __instance)
+        {
+            //if (Regex.IsMatch(__instance.name, @"^Anchor_(Near|Far)_(MainDeck|Extra|Exclude|Grave)$")) textToCopy = $"{FindExtendedTextElement(GameObject.Find("UI/ContentCanvas/ContentManager/PopUpText(Clone)(Clone)"))}";
+            if (__instance.name.Contains("Anchor_Near_Monster")) textToCopy = $"Your monster slot {int.Parse(__instance.name.Last().ToString()) + 1}";
+            if (__instance.name.Contains("Anchor_Far_Monster")) textToCopy = $"Opponent's monster slot {int.Parse(__instance.name.Last().ToString()) + 1}";
+            if (__instance.name.Contains("Anchor_Near_ExMonster")) textToCopy = $"Ex monster {(__instance.name.Last() == 'R' ? "right" : "left")} slot";
+            if (__instance.name.Contains("Anchor_Near_Magic")) textToCopy = $"Your magic slot {int.Parse(__instance.name.Last().ToString()) + 1}";
+            if (__instance.name.Contains("Anchor_Far_Magic")) textToCopy = $"Opponent's magic slot {int.Parse(__instance.name.Last().ToString()) + 1}";
+            if (__instance.name.Contains("Anchor_Near_FieldMagic")) textToCopy = "Your magic field slot";
+            if (__instance.name.Contains("Anchor_Far_FieldMagic")) textToCopy = "Opponent's magic field slot";
+
+            if (__instance.transform.parent.parent.parent.parent.parent.parent.name.Equals("SettingMenuArea"))
+            {
+                ProcessSettingsMenu(__instance);
+            }
+
+            if (__instance.transform.childCount > 0 && __instance.transform.GetChild(0).name.Equals("Main"))
+            {
+                List<(string, string)> soloElements = FindListExtendedTextElement(__instance.gameObject, useRegex: false);
+                textToCopy = $"{soloElements.Last().Item2}, {soloElements.Find(e => e.Item1.Contains("Complete")).Item2}";
+            }
+        }
+
+        internal static void ProcessMissionsMenu(SelectionButton __instance)
+        {
+            if (!__instance.name.Equals("Locator")) return;
+            
+            Transform rootParent = __instance.transform.parent.parent.parent.parent.parent.parent.parent.parent.parent;
+
+            if (rootParent != null)
+            {
+                if (rootParent.childCount > 0)
+                {
+                    // need to replace some with character with x
+                    string rewardText = FindExtendedTextElement(__instance.transform.GetChild(0).GetChild(2).gameObject, null, false);
+                    rewardText = "x" + rewardText[1..];
+
+                    textToCopy = $"{FindExtendedTextElement(rootParent.gameObject, null, false)}\n Reward: {rewardText}\n Time left: {FindExtendedTextElement(rootParent.GetChild(1).GetChild(0).GetChild(3).GetChild(0).gameObject, null, false) ?? "None"}";
+                }
+            }
+        }
+
+        internal static void ProcessDecksMenu(SelectionButton __instance)
+        {
+
+            if(__instance.name.Equals("ImageCard"))
+            {
+                textToCopy = $"Owned: {textToCopy}, rarity: {GetRarity(__instance.transform.Find("IconRarity").GetComponent<Image>().sprite.name)}";
+            }
+
+            if (__instance.transform.parent.parent.parent.name.Equals("Category"))
+            {
+                textToCopy = $"{textToCopy}, category: {FindExtendedTextElement(__instance.transform.parent.parent.gameObject)}";
+            }
+
+            if (__instance.transform.parent.parent.parent.name.Equals("InputButton"))
+            {
+                textToCopy = "Rename deck button";
+            }
+            if (__instance.transform.parent.parent.parent.name.Equals("AutoBuildButton"))
+            {
+                textToCopy = "Auto-build button";
+            }
+        }
+
+        internal static void ProcessSettingsMenu(SelectionButton __instance)
+        {
+            if (__instance.transform.parent.parent.name == "Layout" || __instance.transform.parent.parent.parent.name == "EntryButtonsScrollView" || __instance.name == "CancelButton") return;
+
+            string additionalText = "";
+            Slider sliderElement = __instance.GetComponentInChildren<Slider>();
+            
+            if (sliderElement != null)
+            {
+                additionalText = $"{sliderElement.value} of {sliderElement.maxValue}";
             }
             else
             {
-                CardName = FindUITextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/TitleArea/NameArea/Viewport/TextCardName/");
-                CardDescription = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/DescriptionArea/TextArea/Viewport/TextDescriptionValue/");
-                CardStars = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/IconLevel/TextLevel");
-                CardAtk = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/IconAtk/TextAtk");
-                CardDef = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/IconDef/TextDef");
-                CardPendulumScale = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/PendulumScale/TextPendulumScale");
-                CardLink = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/ParameterArea/IconLink/TextLink");
-                CardElement = GetCardElement(GameObject.Find("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/TitleArea/IconAttribute").GetComponent<Image>().sprite.name);
-                CardAttributes = FindExtendedTextElement("UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/DescriptionArea/PlateDescription/TextDescriptionItem");
+                additionalText = __instance.GetComponentsInChildren<ExtendedTextMeshProUGUI>().Where(e => e.name == "ModeText").First().text;     
+            }
+
+            textToCopy += $"\nValue is {additionalText}";
+        }
+
+        internal static void ProcessNotifications(SelectionButton __instance)
+        {
+            if (__instance.transform.Find("BaseCategory"))
+            {
+                textToCopy = FindExtendedTextElement(__instance.transform.Find("TextBody").gameObject, null, false);
+                if (!__instance.transform.Find("BaseCategory").gameObject.activeInHierarchy) return;
+                textToCopy += $"\nStatus: {__instance.transform.Find("BaseCategory").GetChild(0).GetComponentInChildren<ExtendedTextMeshProUGUI>().text}";
+            }
+        }
+        
+        internal static void ProcessNotificationsPopup(SelectionButton __instance)
+        {
+            if (__instance.transform.parent.parent.parent.parent.parent.parent.name.Equals("NotificationWidget") && currentMenu == Menus.NONE)
+            {
+                textToCopy = FindExtendedTextElement(__instance.transform.Find("TextBody").gameObject, null, false);
+                if (!__instance.transform.Find("BaseCategory").gameObject.activeInHierarchy) return;
+                textToCopy += $"\nStatus: {__instance.transform.Find("BaseCategory").GetChild(0).GetComponentInChildren<ExtendedTextMeshProUGUI>().text}";
             }
         }
 
-        public static RubyTextGX FindUITextElement(string path)
+        internal static void ProcessEventBanner(SelectionButton __instance)
         {
-            return GameObject.Find(path)?.GetComponent<RubyTextGX>();
+            if (__instance.name.Equals("DuelShortcut")) textToCopy = "Event banner";
         }
 
-        public static ExtendedTextMeshProUGUI FindExtendedTextElement(string path)
+        internal static void ProcessTopicsBanner(SelectionButton __instance)
         {
-            return GameObject.Find(path)?.GetComponent<ExtendedTextMeshProUGUI>();
+            if (__instance.name.Equals("ButtonBanner")) textToCopy = $"Topic banner, page {__instance.transform.parent.GetComponent<ScrollRectPageSnap>().hpage}";
         }
 
-        public static RubyTextGX FindUITextElement(Transform obj, bool useRegex)
+        internal static void ProcessDuelPass(SelectionButton __instance)
         {
-            RubyTextGX textElement;
-
-            if (obj.TryGetComponent(out textElement) && textElement != null)
-            {
-                if (!useRegex || (useRegex && !Regex.IsMatch(textElement.text, SpecCharRegex)) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text))
-                {
-                    return textElement;
-                }
-            }
-
-            textElement = FindUITextElementInChildren(obj, true);
-
-            if (textElement != null)
-            {
-                return textElement;
-            }
-
-            Transform parent = obj.parent;
-            while (parent != null)
-            {
-                if (parent.TryGetComponent(out textElement) && textElement != null)
-                {
-                    if (!useRegex || (useRegex && !Regex.IsMatch(textElement.text, SpecCharRegex)) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text))
-                    {
-                        return textElement;
-                    }
-                }
-                parent = parent.parent;
-            }
-
-            return null;
+            if(__instance.name.Contains("passRewardButton")) textToCopy = $"{(__instance.name.Contains("Normalpass") ? "Normal" : "Gold")} pass, grade {FindExtendedTextElement(__instance.transform.parent.parent.gameObject)}, quantity: {"x" + textToCopy[1..]}";
+        }
+        
+        internal static void ProcessNewDeck(SelectionButton __instance)
+        {
+            Transform IconAddDeck = __instance.transform.Find("IconAddDeck");
+            if (IconAddDeck != null && IconAddDeck.gameObject.activeInHierarchy) textToCopy = "New deck button";
         }
 
-        public static ExtendedTextMeshProUGUI FindExtendedTextElement(Transform obj, bool useRegex)
+        #endregion
+
+        #region Find text stuff
+
+        public static string GetElement(string attrname)
         {
-            ExtendedTextMeshProUGUI textElement;
-
-            if (obj.TryGetComponent(out textElement) && textElement != null)
+            if (int.TryParse(attrname.Last().ToString(), out int num))
             {
-                if (!useRegex || (useRegex && !Regex.IsMatch(textElement.text, SpecCharRegex)) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text))
+                foreach (object obj in Enum.GetValues(typeof(Attribute)))
                 {
-                    return textElement;
-                }
-            }
-
-            textElement = FindExtendedTextElementInChildren(obj, useRegex);
-
-            if (textElement != null)
-            {
-                return textElement;
-            }
-
-            Transform parent = obj.parent;
-            while (parent != null)
-            {
-                if (parent.TryGetComponent(out textElement) && textElement != null)
-                {
-                    if (!useRegex || (useRegex && !Regex.IsMatch(textElement.text, SpecCharRegex)) && textElement.gameObject.activeInHierarchy && !BanList.Contains(textElement.text))
-                    {
-                        return textElement;
-                    }
-                }
-
-                parent = parent.parent;
-            }
-
-            return null;
-        }
-
-        public static ExtendedTextMeshProUGUI FindExtendedTextElementInChildren(Transform obj, bool useRegex)
-        {
-            ExtendedTextMeshProUGUI textElement;
-
-            for (int i = 0; i < obj.childCount; i++)
-            {
-                textElement = FindExtendedTextElement(obj.GetChild(i), useRegex);
-                if (textElement != null)
-                {
-                    return textElement;
-                }
-            }
-
-            return FindUITextElementInChildren(obj, useRegex);
-        }
-
-        public static RubyTextGX FindUITextElementInChildren(Transform obj, bool useRegex)
-        {
-            RubyTextGX textElement;
-
-            for (int i = 0; i < obj.childCount; i++)
-            {
-                textElement = FindUITextElement(obj.GetChild(i), useRegex);
-                if (textElement != null)
-                {
-                    return textElement;
-                }
-            }
-
-            return null;
-        }
-
-        private string GetCardElement(string attrname)
-        {
-            if (int.TryParse(attrname.Substring(attrname.Length - 2), out int number))
-            {
-                foreach (Attribute attribute in Enum.GetValues(typeof(Attribute)))
-                {
-                    if ((int)attribute == number)
+                    Attribute attribute = (Attribute)obj;
+                    if (attribute == (Attribute)num)
                     {
                         return attribute.ToString();
                     }
                 }
             }
-
             return "";
         }
 
-        private string FormatCardInfo()
+        public static string GetRarity(string rarity)
         {
-            if (CardName.text.IsNullOrWhiteSpace()) return "";
-            if (Owned.Length > 5) Owned = Owned.Substring(Owned.Length - 6);
-            string cardNameText = $"Name: {CardName.text}";
-            string CardElementText = $"Element: {CardElement}";
-            string CardAttributesText = $"Attributes: {CardAttributes.text}";
-            string cardOwnedText = Owned.Length > 2 ? $"Owned: {Owned.Remove(Owned.Length - 1)}" : "";
-            string cardStarsText = CardStars != null & CardStars.transform.parent.gameObject.activeSelf ? $"Stars: {CardStars.text}" : "";
-            string cardLinkText = CardLink != null & CardLink.transform.parent.gameObject.activeSelf ? $"Link level: {CardLink.text}" : "";
-            string cardPendulumScaleText = CardPendulumScale != null & CardPendulumScale.transform.parent.gameObject.activeSelf ? $"Pendulum scale: {CardPendulumScale.text}" : "";
-            string cardAtkText = CardAtk != null & CardAtk.transform.parent.gameObject.activeSelf ? $"Attack: {CardAtk.text}" : "";
-            string cardDefText = CardDef != null & CardDef.transform.parent.gameObject.activeSelf ? $"Defense: {CardDef.text}" : "";
-            string cardDescriptionText = CardDescription != null ? $"Description: {CardDescription.text}" : "";
-
-            string formattedText = $"{cardNameText}\n{CardElementText}\n{CardAttributesText}\n{cardOwnedText}\n{cardStarsText}\n{cardLinkText}\n{cardPendulumScaleText}\n{cardAtkText}\n{cardDefText}\n{cardDescriptionText}";
-            Owned = "";
-            return Regex.Replace(formattedText, TagsRegex, "").Trim();
+            if (int.TryParse(rarity.Last().ToString(), out int num))
+            {
+                foreach (object obj in Enum.GetValues(typeof(Rarity)))
+                {
+                    Rarity attribute = (Rarity)obj;
+                    if (attribute == (Rarity)num)
+                    {
+                        return attribute.ToString();
+                    }
+                }
+            }
+            return "";
         }
+
+        public static List<(string, string)> FindListExtendedTextElement(GameObject obj, string objPath = "", bool useRegex = true)
+        {
+            List<(string, string)> resultList = new();
+            if (obj == null && !string.IsNullOrEmpty(objPath)) obj = GameObject.Find(objPath);
+
+            if (obj.TryGetComponent(out ExtendedTextMeshProUGUI textElement) && !IsBannedText(textElement.gameObject, textElement.text, useRegex))
+                resultList.Add(($"{textElement.transform.parent.name}/{textElement.name}", textElement.text));
+            if (obj.TryGetComponent(out RubyTextGX rubyTextElement) && !IsBannedText(rubyTextElement.gameObject, rubyTextElement.text, useRegex))
+                resultList.Add(($"{rubyTextElement.transform.parent.name}/{rubyTextElement.name}", rubyTextElement.text));
+            if (obj.TryGetComponent(out TMP_SubMeshUI submeshTextElement) && !IsBannedText(submeshTextElement.gameObject, submeshTextElement.m_TextComponent.text, useRegex))
+                resultList.Add(($"{submeshTextElement.transform.parent.name}/{submeshTextElement.name}", submeshTextElement.textComponent.text));
+
+            resultList.AddRange(FindInChildrenList(obj, null, useRegex));
+
+            return resultList.Distinct().ToList();
+        }
+
+        public static string FindExtendedTextElement(GameObject obj, string objPath = "", bool useRegex = true)
+        {
+            if(obj == null && !string.IsNullOrEmpty(objPath)) obj = GameObject.Find(objPath);
+
+            if (obj.TryGetComponent(out ExtendedTextMeshProUGUI textElement) && !IsBannedText(textElement.gameObject, textElement.text, useRegex))
+                return textElement.text;
+            if (obj.TryGetComponent(out RubyTextGX rubyTextElement) && !IsBannedText(rubyTextElement.gameObject, rubyTextElement.text, useRegex))
+                return rubyTextElement.text;
+            if (obj.TryGetComponent(out TMP_SubMeshUI submeshTextElement) && !IsBannedText(submeshTextElement.gameObject, submeshTextElement.m_TextComponent.text, useRegex))
+                return submeshTextElement.m_TextComponent.text;
+
+            return FindInChildren(obj, "", useRegex);
+        }
+
+        private static List<(string, string)> FindInChildrenList(GameObject obj, string objPath = "", bool useRegex = true)
+        {
+            if (obj == null)
+            {
+                if (!string.IsNullOrEmpty(objPath))
+                {
+                    obj = GameObject.Find(objPath);
+                }
+            }
+
+            List<(string, string)> resultList = new();
+
+            for (int i = 0; i < obj.transform.childCount; i++)
+            {
+                Transform objTransform = obj.transform.GetChild(i);
+
+                if (objTransform.TryGetComponent(out ExtendedTextMeshProUGUI textElement) &&
+                    !IsBannedText(textElement.gameObject, textElement.text, useRegex))
+                {
+                    resultList.Add(($"{textElement.transform.parent.name}/{textElement.name}", textElement.text));
+                }
+
+                if (objTransform.TryGetComponent(out RubyTextGX rubyTextElement) &&
+                    !IsBannedText(rubyTextElement.gameObject, rubyTextElement.text, useRegex))
+                {
+                    resultList.Add(($"{rubyTextElement.transform.parent.name}/{rubyTextElement.name}", rubyTextElement.text));
+                }
+
+                if (objTransform.TryGetComponent(out TMP_SubMeshUI submeshTextElement) &&
+                    !IsBannedText(submeshTextElement.gameObject, submeshTextElement.textComponent.text, useRegex))
+                {
+                    resultList.Add(($"{submeshTextElement.transform.parent.name}/{submeshTextElement.name}", submeshTextElement.textComponent.text));
+                }
+
+                if(objTransform.childCount > 0)
+                {
+                    resultList.AddRange(FindInChildrenList(objTransform.gameObject, useRegex: useRegex));
+                }
+            }
+
+            return resultList.Distinct().ToList();
+        }
+
+
+        private static string FindInChildren(GameObject obj, string objPath = "", bool useRegex = true)
+        {
+            if (obj == null)
+            {
+                if (!string.IsNullOrEmpty(objPath))
+                {
+                    obj = GameObject.Find(objPath);
+                }
+            }
+
+            Transform objTransform = null;
+            ExtendedTextMeshProUGUI UGUIChild = null;
+            RubyTextGX rubyChild = null;
+            TMP_SubMeshUI submeshChild = null;
+
+            for (int i = 0; i < obj.transform.childCount; i++)
+            {
+                objTransform = obj.transform.GetChild(i);
+
+                if (objTransform.TryGetComponent(out ExtendedTextMeshProUGUI textElement) && !IsBannedText(textElement.gameObject, textElement.text, useRegex))
+                {
+                    return textElement.text;
+                }
+
+                UGUIChild = objTransform.GetComponentInChildren<ExtendedTextMeshProUGUI>();
+
+                if (UGUIChild != null && !IsBannedText(UGUIChild.gameObject, UGUIChild.text, useRegex))
+                {
+                    return UGUIChild.text;
+                }
+
+                if (objTransform.TryGetComponent(out RubyTextGX rubyTextElement) && !IsBannedText(rubyTextElement.gameObject, rubyTextElement.text, useRegex))
+                {
+                    return textElement.text;
+                }
+
+                rubyChild = objTransform.GetComponentInChildren<RubyTextGX>();
+
+                if (rubyChild != null && !IsBannedText(rubyChild.gameObject, rubyChild.text, useRegex))
+                {
+                    return rubyChild.text;
+                }
+
+                if (objTransform.TryGetComponent(out TMP_SubMeshUI submeshTextElement) && !IsBannedText(submeshTextElement.gameObject, submeshTextElement.textComponent.text, useRegex))
+                {
+                    return submeshTextElement.textComponent.text;
+                }
+
+                submeshChild = objTransform.GetComponentInChildren<TMP_SubMeshUI>();
+
+                if (rubyChild != null && !IsBannedText(submeshChild.gameObject, submeshChild.textComponent.text, useRegex))
+                {
+                    return submeshChild.textComponent.text;
+                }
+            }
+
+            return null;
+        }
+
+        public static bool IsBannedText(GameObject textElement, string text, bool useRegex)
+        {
+            if (textElement == null || string.IsNullOrEmpty(text) || (textElement.gameObject.activeInHierarchy == false)) return true;
+
+            return (useRegex && Regex.IsMatch(text, (currentMenu != Menus.NONE || textElement.name.Equals("Button")) ? @"^\s*$" : @"^\s*$|[.!]+$")) || bannedText.Contains(text);
+        }
+        #endregion
     }
 }
