@@ -3,9 +3,14 @@ using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Diagnostics;
 
 using UnityEngine;
 using UnityEngine.UI;
+
+using TMPro;
 
 using YgomSystem.UI;
 using YgomSystem.YGomTMPro;
@@ -14,16 +19,17 @@ using YgomGame.CardBrowser;
 
 using BepInEx;
 using BepInEx.Logging;
-using HarmonyLib;
 using BepInEx.Unity.IL2CPP;
+using HarmonyLib;
 using Il2CppInterop.Runtime.Injection;
 
-using TMPro;
-using static TextToClipboard.BaseClass;
+using CrossSpeak;
 
-namespace TextToClipboard
+using static BlindMode.BaseClass;
+
+namespace BlindMode
 {
-    [BepInPlugin("radsi.texttoclipboard", "TextToClipboard", "2.0.0")]
+    [BepInPlugin("radsi.blindmode", "Blind Mode", "2.1.0")]
     public class Plugin : BasePlugin
     {
         internal new static ManualLogSource Log;
@@ -43,10 +49,9 @@ namespace TextToClipboard
                 UnityEngine.Object.DontDestroyOnLoad(plugin);
                 plugin.AddComponent<BaseClass>();
                 plugin.hideFlags = HideFlags.HideAndDontSave;
-                new Harmony("radsi.texttoclipboard").PatchAll();
+                new Harmony("radsi.blindmode").PatchAll();
 
                 Log.LogInfo("Plugin has been loaded!");
-
                 TryPatch();
             }
             catch (Exception e)
@@ -84,7 +89,7 @@ namespace TextToClipboard
     }
     #endregion
 
-    #region duel life points patch
+    #region duels patch
 
     [HarmonyPatch(typeof(DuelLP), nameof(DuelLP.ChangeLP), MethodType.Normal)]
     class PatchChangeLP
@@ -92,7 +97,43 @@ namespace TextToClipboard
         [HarmonyPostfix]
         private static void Postfix(DuelLP __instance)
         {
-            CopyText(string.Format("{0} current life points: {1}", __instance.name.Contains("Far") ? "Opponent's" : "Your", __instance.currentLP));
+            SpeakText(string.Format("{0} current life points: {1}", __instance.name.Contains("Far") ? "Opponent's" : "Your", __instance.currentLP));
+            if (__instance.currentLP < 1)
+            {
+                IsInDuel = false;
+                cardsInDuel.Clear();
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(DuelClient), nameof(DuelClient.Awake))]
+    class PatchDuelClientSetupPvp
+    {
+        [HarmonyPostfix]
+        static void Postfix(DuelClient __instance)
+        {
+            currentMenu = Menus.DUEL;
+            IsInDuel = true;
+        }
+    }
+
+    [HarmonyPatch(typeof(CardRoot), nameof(CardRoot.Initialize), MethodType.Normal)]
+    class PatchCardRoot
+    {
+        [HarmonyPostfix]
+        private static void Postfix(CardRoot __instance)
+        {
+            cardsInDuel.Add(__instance);
+        }
+    }
+
+    [HarmonyPatch(typeof(CardInfo), nameof(CardInfo.SetDescriptionArea))]
+    class PatchCardInfoSetCard
+    {
+        [HarmonyPostfix]
+        static void Postfix(CardInfo __instance)
+        {
+            Instance.Invoke("CopyUI", __instance.gameObject.activeInHierarchy ? 0f : 0.2f);
         }
     }
 
@@ -119,7 +160,7 @@ namespace TextToClipboard
                         break;
                 }
 
-                if (textToCopy != "") CopyText();
+                if (textToCopy != "") SpeakText();
             }
             catch { }
         }
@@ -134,6 +175,13 @@ namespace TextToClipboard
             try
             {
                 if (__instance.currentStatusMode != ColorContainer.StatusMode.Enter) return;
+
+                if (IsInDuel && __instance.transform.parent.parent.name.Contains("DuelListCard"))
+                {
+                    __instance.transform.parent.parent.GetComponent<SelectionButton>().Click();
+                    Instance.CopyUI();
+                    return;
+                }
 
                 textToCopy = "";
 
@@ -243,6 +291,12 @@ namespace TextToClipboard
                     case "CopyButton":
                         textToCopy = "Copy deck button";
                         break;
+                    case "OKButton":
+                        textToCopy = "Ok";
+                        break;
+                    case "ShowOwnedNumToggle":
+                        textToCopy = "Show owned button";
+                        break;
                 }
 
                 switch (__instance.transform.parent.parent.parent.name)
@@ -261,7 +315,7 @@ namespace TextToClipboard
                         break;
                 }
 
-                if (textToCopy != "") CopyText();
+                if (textToCopy != "") SpeakText();
             }
             catch { }
         }
@@ -271,7 +325,7 @@ namespace TextToClipboard
     [HarmonyPatch(typeof(SelectionButton), nameof(SelectionButton.OnClick), MethodType.Normal)]
     class PatchOnClick
     {
-        static List<string> previewElements = new() { "CreateButton", "ImageCard", "NextButton", "PrevButton", "Related Cards", "ThumbButton", "SlotTemplate(Clone)", "Locator", "GoldpassRewardButton", "NormalpassRewardButton", "ButtonDuelPass" };
+        static List<string> previewElements = new() { "CardPict", "CardClone", "CreateButton", "ImageCard", "NextButton", "PrevButton", "Related Cards", "ThumbButton", "SlotTemplate(Clone)", "Locator", "GoldpassRewardButton", "NormalpassRewardButton", "ButtonDuelPass" };
 
         [HarmonyPostfix]
         static void Postfix(SelectionButton __instance)
@@ -281,16 +335,22 @@ namespace TextToClipboard
                 if (menuNames.TryGetValue(FindExtendedTextElement(__instance.gameObject), out Menus menu))
                 {
                     currentMenu = menu;
-                    menusRecord.Add(menu);
+                    //menusRecord.Add(menu);
                     textRecord.Clear();
                 }
             }
             catch { }
-                                                                                                                                // if playing with mouse
-            if (previewElements.Contains(__instance.name) /*|| ((currentMenu == Menus.DUEL || currentMenu == Menus.SOLO) && (__instance.name.Contains("HandCardButton") || __instance.name.Contains("Anchor_") || __instance.name.Contains("DuelListCard(Clone)"))))*/)
+
+            if (__instance.name.Equals("ButtonDecidePositive(Clone)") && IsInDuel)
             {
-                Instance.Invoke("CopyUI", (currentMenu == Menus.DuelPass ? 1.5f : 0.5f));
-                return;
+                IsInDuel = false;
+                cardsInDuel.Clear();
+                currenElement.Clear();
+            }
+
+            if (previewElements.Contains(__instance.name))
+            {
+                Instance.Invoke("CopyUI", currentMenu == Menus.DuelPass ? 1.5f : 0.5f);
             }
         }
     }
@@ -309,35 +369,41 @@ namespace TextToClipboard
                     ProcessNotificationsPopup(__instance);
                     ProcessFriendsMenu(__instance);
                     ProcessProfile(__instance);
-                    ProcessDailyReward(__instance);
+                    //ProcessDailyReward(__instance);
                     ProcessEventBanner(__instance);
                     ProcessTopicsBanner(__instance);
-                    break;
+                break;
                 case Menus.Settings:
                     ProcessSettingsMenu(__instance);
-                    break;
+                break;
                 case Menus.Notifications:
                     ProcessNotifications(__instance);
-                    break;
+                break;
                 case Menus.Missions:
                     ProcessMissionsMenu(__instance);
-                    break;
+                break;
                 case Menus.SHOP:
                     ProcessPacks(__instance);
-                    break;
+                    ProcessCardPack(__instance);
+                break;
                 case Menus.DuelPass:
                     ProcessDuelPass(__instance);
-                    break;
+                break;
                 case Menus.DECK:
                     ProcessDecksMenu(__instance);
                     ProcessNewDeck(__instance);
-                    break;
+                break;
                 case Menus.SOLO:
-                    ProcessSoloMenu(__instance);
-                    break;
+                    ProcessDuelGame(__instance);
+                    ProcessDuelMenu(__instance);
+                break;
+                case Menus.DUEL:
+                    ProcessDuelGame(__instance);
+                    ProcessDuelMenu(__instance);
+                break;
             }
 
-            CopyText();
+            SpeakText();
         }
     }
 
@@ -362,7 +428,6 @@ namespace TextToClipboard
             if (__instance.manager.GetFocusViewController().name == "Home")
             {
                 currentMenu = Menus.NONE;
-                menusRecord.Clear();
             }
         }
     }
@@ -372,9 +437,10 @@ namespace TextToClipboard
     {
         public static BaseClass Instance;
 
-        public static List<string> textRecord = new List<string>();
-        public static List<string> itemsRecord = new List<string>();
-        public static List<Menus> menusRecord = new List<Menus>();
+        public static List<string> textRecord = new();
+        public static List<CardRoot> cardsInDuel = new();
+
+        public static PreviewElement currenElement = new();
 
         public static Dictionary<string, Menus> menuNames = new()
         {
@@ -391,24 +457,9 @@ namespace TextToClipboard
         public enum Menus { NONE, DUEL, DECK, SOLO, SHOP, Missions, Notifications, Settings, DuelPass }
         public static Menus currentMenu = Menus.NONE;
 
-        public class PreviewElement
+        public class CardCustomInfo
         {
-            private static PreviewElement _instance;
-
-            public static PreviewElement Instance
-            {
-                get
-                {
-                    if (_instance == null)
-                    {
-                        _instance = new PreviewElement();
-                    }
-                    return _instance;
-                }
-            }
-
-            public string Name { get; set; } = string.Empty;
-            public string Description { get; set; } = string.Empty;
+            public GameObject cardObject { get; set; } = null;
             public string Link { get; set; } = string.Empty;
             public string Stars { get; set; } = string.Empty;
             public string Atk { get; set; } = string.Empty;
@@ -418,6 +469,14 @@ namespace TextToClipboard
             public string SpellType { get; set; } = string.Empty;
             public string Element { get; set; } = string.Empty;
             public string Owned { get; set; } = string.Empty;
+            public bool IsInHand { get; set; } = true;
+        }
+
+        public class PreviewElement
+        {
+            public CardCustomInfo cardInfo { get; set; } = new CardCustomInfo();
+            public string Name { get; set; } = string.Empty;
+            public string Description { get; set; } = string.Empty;
             public string TimeLeft { get; set; } = string.Empty;
             public string Price { get; set; } = string.Empty;
 
@@ -438,6 +497,44 @@ namespace TextToClipboard
                 {
                     Console.WriteLine($"{property.Name}: {property.GetValue(this)}");
                 }
+            }
+
+            public void CopyValuesFrom(PreviewElement source)
+            {
+                if (source == null) throw new ArgumentNullException(nameof(source));
+
+                foreach (PropertyInfo property in GetType().GetProperties())
+                {
+                    if (property.CanRead && property.CanWrite)
+                    {
+                        var value = property.GetValue(source);
+
+                        if (property.Name == nameof(cardInfo) && value is CardCustomInfo sourceCardInfo)
+                        {
+                            cardInfo = DeepCopy(sourceCardInfo);
+                        }
+                        else
+                        {
+                            property.SetValue(this, value);
+                        }
+                    }
+                }
+            }
+
+            private static T DeepCopy<T>(T source) where T : class, new()
+            {
+                if (source == null) return null;
+
+                var result = new T();
+                foreach (PropertyInfo property in typeof(T).GetProperties())
+                {
+                    if (property.CanRead && property.CanWrite)
+                    {
+                        var value = property.GetValue(source);
+                        property.SetValue(result, value);
+                    }
+                }
+                return result;
             }
         }
 
@@ -461,41 +558,108 @@ namespace TextToClipboard
             UltraRare = 3
         }
 
+        private enum DuelPositions
+        {
+            Normal = 0,
+            Rare = 1,
+            SuperRare = 2,
+            UltraRare = 3
+        }
+
         public static List<string> bannedText = new(){ "00:00", "You can add new Cards to your Deck." };
-        public static float timer = 0f;
-        public static bool searchShopDesc;
         public static string textToCopy;
         public static string old_copiedText;
+
+        public static bool IsInDuel = false;
 
         public static DateTime lastExecutionTime;
         public static readonly TimeSpan cooldown = TimeSpan.FromSeconds(0.1f);
 
+        public static bool UsingMouse = false;
+
+
         #region ui related stuff 
 
         public static SnapContentManager SnapContentManager;
-        public static int clampedPage;
+        //public static int[] indexRoll = { 0, 1, 2 };
         
         public void Awake()
         {
             Instance = this;
+            CrossSpeakManager.Instance.Initialize();
         }
 
-        internal static void CopyText(string text = "")
+        public void Start()
+        {
+            if (Directory.Exists(Path.Join(Paths.PluginPath, "dependencies"))) return;
+
+            string tempFilePath = Path.Combine(Paths.PluginPath, "directories.zip");
+
+            using (var zipFile = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write))
+            {
+                zipFile.Write(Resource1.dependencies);
+                zipFile.Close();
+            }
+
+            ZipFile.ExtractToDirectory(tempFilePath, Paths.PluginPath);
+            File.Delete(tempFilePath);
+
+            ProcessStartInfo startInfo = new ProcessStartInfo()
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"Start-Sleep -Seconds 2; Start-Process 'steam://run/1449850'\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+
+            Process.Start(startInfo);
+
+            Application.Quit();
+        }
+
+        public void OnApplicationQuit()
+        {
+            CrossSpeakManager.Instance.Close();   
+        }
+
+        public void Update()
+        {
+            if (IsInDuel)
+            {
+                if (Input.GetKeyDown(KeyCode.Space))
+                {
+                    List<DuelLP> DuelLPs = FindObjectsOfType<DuelLP>().ToList();
+                    SpeakText($"Your life points: {DuelLPs.Find(e => e.m_IsNear).currentLP}\nOpponent's life points: {DuelLPs.Find(e => !e.m_IsNear).currentLP}");
+                }
+
+                if (Input.GetKeyDown(KeyCode.LeftAlt))
+                {
+                    currenElement.Clear();
+                    CardInfo cardInfo = FindObjectOfType<CardInfo>();
+                    if(!cardInfo.gameObject.activeInHierarchy) cardInfo.gameObject.SetActive(true);
+                    CopyUI();
+                }
+            }
+        }
+
+        internal static void SpeakText(string text = "")
         {
             if (text == "") text = textToCopy;
 
             if (DateTime.Now - lastExecutionTime >= cooldown)
             {
-                lastExecutionTime = DateTime.Now;
-                if (!string.IsNullOrEmpty(old_copiedText) && old_copiedText.Contains(text)) return;
-                if (!string.IsNullOrEmpty(text.Trim()) || !bannedText.Contains(text))
-                {
-                    text = Regex.Replace(text, @"<[^>]+>", "");
-                    Plugin.Log.LogInfo($"text copied: {text}");
-                    GUIUtility.systemCopyBuffer = text;
-                }
+                if (!string.IsNullOrEmpty(old_copiedText) && old_copiedText.Equals(text)) return;
+                if (string.IsNullOrEmpty(text?.Trim()) || bannedText.Contains(text)) return;
+
+                text = Regex.Replace(text, @"<[^>]+>", "");
+
+                Plugin.Log.LogInfo($"text to speak: {text}");
+
+                CrossSpeakManager.Instance.Speak(text);
                 textRecord.Add(text);
                 old_copiedText = text;
+
+                lastExecutionTime = DateTime.Now;
             }
         }
 
@@ -515,7 +679,7 @@ namespace TextToClipboard
                     {
                         if (FindExtendedTextElement(null, "UI/OverlayCanvas/DialogManager/CommonDialog/CommonDialogUI(Clone)/Window/Content/TitleGrp/Text").Contains("Unable"))
                             textToCopy = "Unable to create card";
-                        CopyText();
+                        SpeakText();
                     }
                     break;
             }
@@ -525,8 +689,8 @@ namespace TextToClipboard
             if (SnapContentManager == null && !(currentMenu == Menus.DECK || currentMenu == Menus.SOLO || currentMenu == Menus.DUEL))
             {
                 List<(string, string)> textElements = FindListExtendedTextElement(null, "UI/OverlayCanvas/DialogManager/ItemPreview/ItemPreviewUI(Clone)/Root/RootMainArea/DescArea/RootDesc/", false);
-                PreviewElement.Instance.Name = $"{(textElements.Count > 2 ? $"{textElements.First().Item2} - " : "")}{textElements[textElements.Count - 2].Item2}";
-                PreviewElement.Instance.Description = textElements.Last().Item2;
+                currenElement.Name = $"{(textElements.Count > 2 ? $"{textElements.First().Item2} - " : "")}{textElements[textElements.Count - 2].Item2}";
+                currenElement.Description = textElements.Last().Item2;
                 return;
             }
 
@@ -546,10 +710,9 @@ namespace TextToClipboard
 
                 if (pathCondition.PathPrefix == pathConditions[0].PathPrefix)
                 {
-                    clampedPage = (SnapContentManager.currentPage % 3 + 3) % 3;
-                    pathPrefix = string.Format(pathCondition.PathPrefix, clampedPage);
+                    pathPrefix = string.Format(pathCondition.PathPrefix, /*indexRoll[1]*/SnapContentManager.currentPage % 3);
                 }
-
+               
                 List<(string, string)> ParametersTexts = FindListExtendedTextElement(null, pathPrefix);
 
                 /*for (int i = 0; i < ParametersTexts.Count; i++)
@@ -558,31 +721,26 @@ namespace TextToClipboard
                 }*/
 
                 //Plugin.Log.LogInfo(1);
-                PreviewElement.Instance.Name = ParametersTexts[0].Item2;
-                if (itemsRecord.Find(e => e.Contains(PreviewElement.Instance.Name)) != null) return;
+                currenElement.Name = ParametersTexts[0].Item2;
                 //Plugin.Log.LogInfo(2);
-                PreviewElement.Instance.Description = ParametersTexts.Find(e => e.Item1.Contains("DescriptionValue")).Item2 ?? "";
+                currenElement.Description = ParametersTexts.Find(e => e.Item1.Contains("DescriptionValue")).Item2 ?? "";
                 //Plugin.Log.LogInfo(3);
-                PreviewElement.Instance.Stars = ParametersTexts.Find(e => e.Item1.Contains("Rank") || e.Item1.Contains("Level")).Item2 ?? "";
+                currenElement.cardInfo.Stars = ParametersTexts.Find(e => e.Item1.Contains("Rank") || e.Item1.Contains("Level")).Item2 ?? "";
                 //Plugin.Log.LogInfo(4);
-                PreviewElement.Instance.Atk = ParametersTexts.Find(e => e.Item1.Contains("Atk")).Item2 ?? "";
+                currenElement.cardInfo.Atk = ParametersTexts.Find(e => e.Item1.Contains("Atk")).Item2 ?? "";
                 //Plugin.Log.LogInfo(5);
-                PreviewElement.Instance.Def = ParametersTexts.Find(e => e.Item1.Contains("Def")).Item2 ?? "";
+                currenElement.cardInfo.Def = ParametersTexts.Find(e => e.Item1.Contains("Def")).Item2 ?? "";
                 //Plugin.Log.LogInfo(6);
-                PreviewElement.Instance.PendulumScale = ParametersTexts.Find(e => e.Item1.Contains("Pendulum")).Item2 ?? "";
+                currenElement.cardInfo.PendulumScale = ParametersTexts.Find(e => e.Item1.Contains("Pendulum")).Item2 ?? "";
                 //Plugin.Log.LogInfo(7);
-                PreviewElement.Instance.Link = ParametersTexts.Find(e => e.Item1.Contains("Link")).Item2 ?? "";
+                currenElement.cardInfo.Link = ParametersTexts.Find(e => e.Item1.Contains("Link")).Item2 ?? "";
                 //Plugin.Log.LogInfo(8);
-                PreviewElement.Instance.Element = GetElement(GameObject.Find($"{pathPrefix}/{(pathConditions[0].Condition == false ? (pathConditions[1].Condition ? "TitleArea/PlateTitle/IconAttribute" : "TitleArea/AttributeRoot/IconAttribute") : "TitleAreaGroup/TitleArea/IconAttribute")}").GetComponent<Image>().sprite.name) ?? "";
+                currenElement.cardInfo.Element = GetElement(GameObject.Find($"{pathPrefix}/{(pathConditions[0].Condition == false ? (pathConditions[1].Condition ? "TitleArea/PlateTitle/IconAttribute" : "TitleArea/AttributeRoot/IconAttribute") : "TitleAreaGroup/TitleArea/IconAttribute")}").GetComponent<Image>().sprite.name) ?? "";
                 //Plugin.Log.LogInfo(9);
-                PreviewElement.Instance.Attributes = ParametersTexts.Find(e => e.Item1.Contains("DescriptionItem")).Item2 ?? "";
+                currenElement.cardInfo.Attributes = ParametersTexts.Find(e => e.Item1.Contains("DescriptionItem")).Item2 ?? "";
                 //Plugin.Log.LogInfo(10);
-                PreviewElement.Instance.SpellType = ParametersTexts.Find(e => e.Item1.Contains("SpellTrap")).Item2 ?? "";
-
-                if (pathPrefix == pathConditions[1].PathPrefix)
-                {
-                    PreviewElement.Instance.Owned = (ParametersTexts.Find(e => e.Item1.Contains("CardNum")).Item2 ?? "") + "/";
-                }
+                currenElement.cardInfo.SpellType = ParametersTexts.Find(e => e.Item1.Contains("SpellTrap")).Item2 ?? "";
+                currenElement.cardInfo.Owned = ParametersTexts.Find(e => e.Item1.Contains("CardNum")).Item2 ?? "";
 
                 break;
             }
@@ -590,55 +748,46 @@ namespace TextToClipboard
 
         public static string FormatInfo()
         {
-            if (itemsRecord.Find(e => e.Contains(PreviewElement.Instance.Name)) != null) return itemsRecord.Find(e => e.Contains(PreviewElement.Instance.Name));
-
-            if (string.IsNullOrWhiteSpace(PreviewElement.Instance.Name)) return string.Empty;
-
-            string owned = PreviewElement.Instance.Owned;
-
-            if (owned.Length > 5) owned = owned[^6..];
+            if (string.IsNullOrWhiteSpace(currenElement.Name)) return string.Empty;
 
             // Add main parameters
-            List<string> resultList = new();
-
-            if (!string.IsNullOrEmpty(PreviewElement.Instance.Name))
-                resultList.Add($"Name: {PreviewElement.Instance.Name}");
-
-            if (!string.IsNullOrEmpty(PreviewElement.Instance.Description))
-                resultList.Add($"Description: {PreviewElement.Instance.Description}");
+            List<string> resultList = new List<string>
+            {
+                !string.IsNullOrEmpty(currenElement.Name) ? $"Name: {currenElement.Name}" : null,
+                !string.IsNullOrEmpty(currenElement.Description) ? $"Description: {currenElement.Description}" : null
+            };
 
             // Check if it's not an item preview to add the rest of parameters
             if (SnapContentManager != null || currentMenu == Menus.SOLO || currentMenu == Menus.DUEL || currentMenu == Menus.DECK)
             {
                 resultList = new List<string>
                 {
-                    !string.IsNullOrEmpty(PreviewElement.Instance.Name) ? $"Name: {PreviewElement.Instance.Name}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.Atk) ? $"Attack: {PreviewElement.Instance.Atk}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.Link) ? $"Link level: {PreviewElement.Instance.Link}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.Def) ? $"Defense: {PreviewElement.Instance.Def}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.Stars) ? $"Stars: {PreviewElement.Instance.Stars}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.Element) ? $"Element: {PreviewElement.Instance.Element}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.PendulumScale) ? $"Pendulum scale: {PreviewElement.Instance.PendulumScale}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.Attributes) ? $"Attributes: {(currentMenu == Menus.DECK ? PreviewElement.Instance.Attributes[1..^1] : PreviewElement.Instance.Attributes)}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.SpellType) ? $"Spell type: {PreviewElement.Instance.SpellType}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.Owned) ? $"Owned: {PreviewElement.Instance.Owned.TrimEnd('/')}" : null,
-                    !string.IsNullOrEmpty(PreviewElement.Instance.Description) ? $"Description: {PreviewElement.Instance.Description}" : FindExtendedTextElement(null, "UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/DescriptionArea/TextArea/Viewport/TextDescriptionValue/"),
+                    !string.IsNullOrEmpty(currenElement.Name) ? $"Name: {currenElement.Name}" : null,
+                    (!currenElement.cardInfo.IsInHand && IsInDuel) ? $"Is faced down?: {!GetCardRootOfCurrentCard().isFace}" : null,
+                    !string.IsNullOrEmpty(currenElement.cardInfo.Atk) ? $"Attack: {currenElement.cardInfo.Atk}" : null,
+                    !string.IsNullOrEmpty(currenElement.cardInfo.Link) ? $"Link level: {currenElement.cardInfo.Link}" : null,
+                    !string.IsNullOrEmpty(currenElement.cardInfo.Def) ? $"Defense: {currenElement.cardInfo.Def}" : null,
+                    !string.IsNullOrEmpty(currenElement.cardInfo.Stars) ? $"Stars: {currenElement.cardInfo.Stars}" : null,
+                    !string.IsNullOrEmpty(currenElement.cardInfo.Element) ? $"Element: {currenElement.cardInfo.Element}" : null,
+                    !string.IsNullOrEmpty(currenElement.cardInfo.PendulumScale) ? $"Pendulum scale: {currenElement.cardInfo.PendulumScale}" : null,
+                    !string.IsNullOrEmpty(currenElement.cardInfo.Attributes) ? $"Attributes: {(currentMenu == Menus.DECK ? currenElement.cardInfo.Attributes[1..^1] : currenElement.cardInfo.Attributes)}" : null,
+                    !string.IsNullOrEmpty(currenElement.cardInfo.SpellType) ? $"Spell type: {currenElement.cardInfo.SpellType}" : null,
+                    !string.IsNullOrEmpty(currenElement.cardInfo.Owned) ? $"Owned: {currenElement.cardInfo.Owned}" : null,
+                    !string.IsNullOrEmpty(currenElement.Description) ? $"Description: {currenElement.Description}" : FindExtendedTextElement(null, "UI/ContentCanvas/ContentManager/DuelClient/CardInfo/CardInfo(Clone)/Root/Window/DescriptionArea/TextArea/Viewport/TextDescriptionValue/"),
                 };
             }
             else if (currentMenu == Menus.SHOP) // Its a card pack
             {
                 resultList = new List<string>
                 {
-                    $"Name: {PreviewElement.Instance.Name}",
-                    $"Category: {PreviewElement.Instance.Description}",
-                    $"Time left: {PreviewElement.Instance.TimeLeft}",
-                    $"Price: {PreviewElement.Instance.Price}",
+                    $"Name: {currenElement.Name}",
+                    $"Category: {currenElement.Description}",
+                    $"Time left: {currenElement.TimeLeft}",
+                    $"Price: {currenElement.Price}",
                 };
             }
 
-            PreviewElement.Instance.Clear();
             resultList = resultList.Where(item => item?.Trim() != null).ToList();
-            itemsRecord.Add(string.Join("\n", resultList));
 
             return string.Join("\n", resultList);
         }
@@ -650,7 +799,7 @@ namespace TextToClipboard
         public void CopyUI()
         {
             GetUITextElements();
-            CopyText(FormatInfo());
+            SpeakText(FormatInfo());
         }
        
         internal static void DeselectButton()
@@ -690,40 +839,64 @@ namespace TextToClipboard
 
             ParametersTexts = FindListExtendedTextElement(__instance.gameObject);
 
-            PreviewElement.Instance.Name = $"{ParametersTexts.Find(e => e.Item1.Contains("PickupMessage")).Item2 ?? ""} - {ParametersTexts.Find(e => e.Item1.Contains("Name")).Item2} ({ParametersTexts.Find(e => e.Item1.Contains("New")).Item2 ?? ""})";
-            PreviewElement.Instance.Description = $"{FindExtendedTextElement(null, "UI/ContentCanvas/ContentManager/Shop/ShopUI(Clone)/Root/Main/ProductsRoot/ShowcaseWidget/ListRoot/ProductList/Viewport/Mask/Content/ShopGroupHeaderWidget(Clone)/Label", false)}";
-            PreviewElement.Instance.TimeLeft = $"{ParametersTexts.Find(e => e.Item1.Contains("Limit")).Item2 ?? "None"}";
-            PreviewElement.Instance.Price = $"{ParametersTexts.Find(e => e.Item1.Contains("PriceGroup")).Item2 ?? ""}";
+            currenElement.Name = $"{ParametersTexts.Find(e => e.Item1.Contains("PickupMessage")).Item2 ?? ""} - {ParametersTexts.Find(e => e.Item1.Contains("Name")).Item2} ({ParametersTexts.Find(e => e.Item1.Contains("New")).Item2 ?? ""})";
+            currenElement.Description = $"{FindExtendedTextElement(null, "UI/ContentCanvas/ContentManager/Shop/ShopUI(Clone)/Root/Main/ProductsRoot/ShowcaseWidget/ListRoot/ProductList/Viewport/Mask/Content/ShopGroupHeaderWidget(Clone)/Label", false)}";
+            currenElement.TimeLeft = $"{ParametersTexts.Find(e => e.Item1.Contains("Limit")).Item2 ?? "None"}";
+            currenElement.Price = $"{ParametersTexts.Find(e => e.Item1.Contains("PriceGroup")).Item2 ?? ""}";
 
-            CopyText(FormatInfo());
+            SpeakText(FormatInfo());
         }
 
-        internal static void ProcessSoloMenu(SelectionButton __instance)
+        internal static void ProcessDuelMenu(SelectionButton __instance)
         {
-            //if (Regex.IsMatch(__instance.name, @"^Anchor_(Near|Far)_(MainDeck|Extra|Exclude|Grave)$")) textToCopy = $"{FindExtendedTextElement(GameObject.Find("UI/ContentCanvas/ContentManager/PopUpText(Clone)(Clone)"))}";
-            /*if (__instance.name.Contains("Anchor_Near_Monster")) textToCopy = $"Your monster slot {int.Parse(__instance.name.Last().ToString()) + 1}";
-            if (__instance.name.Contains("Anchor_Far_Monster")) textToCopy = $"Opponent's monster slot {int.Parse(__instance.name.Last().ToString()) + 1}";
-            if (__instance.name.Contains("Anchor_Near_ExMonster")) textToCopy = $"Ex monster {(__instance.name.Last() == 'R' ? "right" : "left")} slot";
-            if (__instance.name.Contains("Anchor_Near_Magic")) textToCopy = $"Your magic slot {int.Parse(__instance.name.Last().ToString()) + 1}";
-            if (__instance.name.Contains("Anchor_Far_Magic")) textToCopy = $"Opponent's magic slot {int.Parse(__instance.name.Last().ToString()) + 1}";
-            if (__instance.name.Contains("Anchor_Near_FieldMagic")) textToCopy = "Your magic field slot";
-            if (__instance.name.Contains("Anchor_Far_FieldMagic")) textToCopy = "Opponent's magic field slot";*/
-
-            // if playin with controller
-            if (__instance.name.Contains("HandCardButton") || __instance.name.Contains("Anchor_") || __instance.name.Contains("DuelListCard(Clone)") || (__instance.name.Contains("Card") && __instance.transform.parent.name.Equals("CardRoot")))
+            try
             {
-                Instance.CopyUI();
+                if (__instance.transform.parent.parent.parent.parent.parent.parent.name.Equals("SettingMenuArea")) ProcessSettingsMenu(__instance);
+
+                if (__instance.transform.childCount > 0 && __instance.transform.GetChild(0).name.Equals("Main"))
+                {
+                    List<(string, string)> soloElements = FindListExtendedTextElement(__instance.gameObject, useRegex: false);
+                    textToCopy = $"{soloElements.Last().Item2}, {soloElements.Find(e => e.Item1.Contains("Complete")).Item2}";
+                }
+            }
+            catch
+            {
+
+            }
+        }
+        
+        internal static void ProcessDuelGame(SelectionButton __instance)
+        {
+            if (!IsInDuel) return;
+
+            //Plugin.Log.LogInfo(__instance.name);
+
+            if (!(__instance.name.Contains("HandCard") || __instance.name.Contains("Anchor_"))) return;
+
+            currenElement.cardInfo.cardObject = __instance.gameObject;
+
+            if (__instance.name.Contains("Anchor_"))
+            {
+                currenElement.cardInfo.IsInHand = false;
+            }
+            else
+            {
+                currenElement.cardInfo.IsInHand = true;
+                return;
             }
 
-            if (__instance.transform.parent.parent.parent.parent.parent.parent.name.Equals("SettingMenuArea"))
+            try
             {
-                ProcessSettingsMenu(__instance);
-            }
+                CardRoot cardRoot = GetCardRootOfCurrentCard();
 
-            if (__instance.transform.childCount > 0 && __instance.transform.GetChild(0).name.Equals("Main"))
+                if (!cardRoot.isFace && cardRoot.team != 0)
+                {
+                    SpeakText("Opponent's face down card!");
+                }
+            }
+            catch
             {
-                List<(string, string)> soloElements = FindListExtendedTextElement(__instance.gameObject, useRegex: false);
-                textToCopy = $"{soloElements.Last().Item2}, {soloElements.Find(e => e.Item1.Contains("Complete")).Item2}";
+
             }
         }
 
@@ -746,13 +919,12 @@ namespace TextToClipboard
             }
         }
 
-        internal static void ProcessDecksMenu(SelectionButton __instance)
+        public static void ProcessDecksMenu(SelectionButton __instance)
         {
-            // If playing with controller method CopyUI needs to be used
             if(__instance.name.Equals("ImageCard"))
             {
-                //textToCopy = $"Owned: {textToCopy}, rarity: {GetRarity(__instance.transform.Find("IconRarity").GetComponent<Image>().sprite.name)}";
-                Instance.CopyUI();
+                if(!UsingMouse) Instance.CopyUI();
+                else textToCopy = $"Owned: {textToCopy}, rarity: {GetRarity(__instance.transform.Find("IconRarity").GetComponent<Image>().sprite.name)}";
             }
 
             if (__instance.transform.parent.parent.parent.name.Equals("Category"))
@@ -787,6 +959,16 @@ namespace TextToClipboard
             }
 
             textToCopy += $"\nValue is {additionalText}";
+        }
+
+        internal static void ProcessCardPack(SelectionButton __instance)
+        {
+            if (__instance.name.Equals("CardPict"))
+            {
+                string ownedText = FindExtendedTextElement(__instance.transform.parent.Find("NumTextArea").gameObject);
+                ownedText = "x" + ownedText[1..];
+                textToCopy = $"Rarity: {GetRarity(__instance.transform.parent.Find("IconRarity").GetComponent<Image>().sprite.name)}, New: {(__instance.transform.parent.Find("NewIcon").gameObject.activeInHierarchy ? "Yes" : "No")}, Owned: {ownedText}";
+            }
         }
 
         internal static void ProcessNotifications(SelectionButton __instance)
@@ -828,6 +1010,13 @@ namespace TextToClipboard
         {
             Transform IconAddDeck = __instance.transform.Find("IconAddDeck");
             if (IconAddDeck != null && IconAddDeck.gameObject.activeInHierarchy) textToCopy = "New deck button";
+        }
+
+        internal static CardRoot GetCardRootOfCurrentCard()
+        {
+            CardRoot cardRoot = cardsInDuel.Find(e => e.cardLocator.pos == currenElement.cardInfo.cardObject.transform.position);
+            Plugin.Log.LogInfo(cardRoot.name);
+            return cardRoot;
         }
 
         #endregion
